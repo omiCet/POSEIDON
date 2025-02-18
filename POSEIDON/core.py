@@ -386,7 +386,7 @@ def define_model(model_name, bulk_species, param_species,
                  log_P_slope_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
                  number_P_knots = 0, PT_penalty = False,
                  Na_K_fixed_ratio = False,
-                 reflection_up_to_5um = False):
+                 reflection_up_to_5um = False, r_profile = 'auto'):
     '''
     Create the model dictionary defining the configuration of the user-specified 
     forward model or retrieval.
@@ -503,7 +503,10 @@ def define_model(model_name, bulk_species, param_species,
             If True, sets log_K = 0.1 * log_Na
         reflection_up_to_5um (bool):
             If True, only computes albedo up to 5 um (to speed up computations).
-
+        r_profile (str):
+            Determines whether the radial profile is determined using hydrostatic equilibrium
+            or defined by the user.
+            (Options: auto / file_read)
     Returns:
         model (dict):
             Dictionary containing the description of the desired POSEIDON model.
@@ -655,7 +658,8 @@ def define_model(model_name, bulk_species, param_species,
              'log_P_slope_arr': log_P_slope_arr,
              'Na_K_fixed_ratio': Na_K_fixed_ratio,
              'reflection_up_to_5um' : reflection_up_to_5um,
-             'PT_penalty' : PT_penalty
+             'PT_penalty' : PT_penalty,
+             'r_profile': r_profile,
              }
 
     return model
@@ -837,7 +841,8 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                     log_g = None, M_p = None, T_input = [], X_input = [], 
                     P_surf = None, P_param_set = 1.0e-2, He_fraction = 0.17, 
                     N_slice_EM = 2, N_slice_DN = 4, constant_gravity = False,
-                    chemistry_grid = None):
+                    chemistry_grid = None, fill_H_He = False,
+                    r_input = [], r_up_input = [], r_low_input = [], dr_input = []):
     '''
     Generate an atmosphere from a user-specified model and parameter set. In
     full generality, this function generates 3D pressure-temperature and mixing 
@@ -888,7 +893,18 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
         chemistry_grid (dict):
             For models with a pre-computed chemistry grid only, this dictionary
             is produced in chemistry.py.
-    
+        fill_H_He (bool):
+            Applies when mixing ratio profiles are input by the user. 
+            If True, ignores user-provided H (and He if designated as a bulk species)
+            and fills them in as bulk species.
+        r (3D np.array of float):
+            Radial distance profile (m). Only read if r_profile is 'file_read'
+        r_up (3D np.array of float):
+            Upper layer boundaries (m). Only read if r_profile is 'file_read'
+        r_low (3D np.array of float):
+            Lower layer boundaries (m). Only read if r_profile is 'file_read'
+        dr (3D np.array of float):
+            Layer thicknesses (m). Only read if r_profile is 'file_read'
     Returns:
         atmosphere (dict):
             Collection of atmospheric properties required to compute the
@@ -920,6 +936,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     aerosol_species = model['aerosol_species']
     Na_K_fixed_ratio = model['Na_K_fixed_ratio']
     PT_penalty = model['PT_penalty']
+    r_profile = model['r_profile']
 
     # Unpack planet properties
     R_p = planet['planet_radius']
@@ -1014,7 +1031,8 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            beta, phi, theta, species_vert_gradient, He_fraction,
                            T_input, X_input, P_param_set, log_P_slope_phot,
                            log_P_slope_arr, Na_K_fixed_ratio, constant_gravity,
-                           chemistry_grid, PT_penalty, T_eq)
+                           chemistry_grid, PT_penalty, T_eq, r_profile, fill_H_He, r_input,
+                           r_up_input, r_low_input, dr_input,)
 
     #***** Store cloud / haze / aerosol properties *****#
 
@@ -1096,6 +1114,9 @@ def check_atmosphere_physical(atmosphere, opac):
     
             # Check if minimum or maximum temperatures are outside opacity range
             if ((T_max > T_fine_max) or (T_min < T_fine_min)): 
+                print("Atmosphere temps are outside range of valid opacity temperatures!")
+                print("Tmax = " + str(T_max) + ", Tmin = " + str(T_min))
+                print("Tfinemax = " + str(T_fine_max) + ", Tfinemin = " + str(T_fine_min))
                 return False
 
             else:
@@ -1168,6 +1189,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     if (check_atmosphere_physical(atmosphere, opac) == False):
         spectrum = np.empty(len(wl))
         spectrum[:] = np.NaN
+        print(f"Atmosphere for model {model['model_name']} is unphysical!")
         return spectrum   # Unphysical => reject model
 
     # Unpack model properties

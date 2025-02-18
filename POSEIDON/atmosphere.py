@@ -1690,6 +1690,47 @@ def elemental_ratio(included_species, X, element_1, element_2):
     return element_ratio
 
 
+def fill_H_He_function(P, X_input, N_species, included_species, 
+                       bulk_species, param_species, He_fraction):
+    '''
+    Overrides user-input mixing ratios of bulk species when bulk_species == ['H']
+    or bulk_species == ['H', 'He'].
+
+    Args:
+        P (np.array of float):
+            Atmosphere pressure array (bar).
+        X_input (2D np.array of float):
+            Mixing ratio profiles provided by the user.
+        N_species (int):
+            Total number of included species.
+        included_species (np.array of str):
+            List of chemical species included in the model (including bulk species).
+        bulk_species (np.array of str):
+            Bulk species dominating atmosphere (e.g. ['H2', 'He']).
+        param_species (np.array of str):
+            Chemical species with parametrised mixing ratios.
+        He_fraction (float):
+            Assumed H2/He ratio (0.17 default corresponds to the solar ratio).
+            
+    Returns: 
+        X (4D np.array of float):
+            Mixing ratio profile.
+        
+    '''
+    X_param = np.zeros((len(param_species), len(P), 1, 1))
+
+    for i, species in enumerate(param_species):
+        #Order of species data in X_input is given by model['chemical_species'], which is included_species
+        #Find index of first occurence of species in included_species
+        idx = np.nonzero(included_species==species)[0][0]
+        #Gets the entry from X_input corresponding to species
+        X_param[i,:,0,0] = X_input[idx]
+
+    X = add_bulk_component(P, X_param, N_species, 1, 1, 
+                       bulk_species, He_fraction)
+    
+    return X
+
 def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref, 
              log_X_state, included_species, bulk_species, param_species, 
              active_species, CIA_pairs, ff_pairs, bf_species, N_sectors, 
@@ -1697,7 +1738,9 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
              He_fraction, T_input, X_input, P_param_set, 
              log_P_slope_phot, log_P_slope_arr, Na_K_fixed_ratio,
              constant_gravity = False, chemistry_grid = None,
-             PT_penalty = False, T_eq = None):
+             PT_penalty = False, T_eq = None, r_profile = 'auto', fill_H_He = False,
+             r_input = [], r_up_input = [], r_low_input = [], dr_input = [], X_param_names = [], 
+             ):
     '''
     Main function to calculate the vertical profiles in each atmospheric 
     column. The profiles cover the temperature, number density, mean molecular 
@@ -1784,8 +1827,11 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         PT_penalty (bool):
             For Pelletier profile. Only here so that PT input works.
         T_eq (float):
-            Equilibrium temperature of planet. For the Line PT profile.
-            Note: not the same as T_equ, the free parameter in Guillot profile.
+            Equilibrium temperature of planet. For Line PT profile
+            Not the same as T_equ, the free parameter in Guillot profile
+        fill_H_He (bool):
+            Applies when mixing ratio profiles are input by the user. 
+            If True, ignores user-provided H and He and fills them in as bulk species.
     
     Returns:
         T (3D np.array of float):
@@ -1997,6 +2043,18 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
     if (X_profile == 'file_read'):
         X = X_input.reshape((N_species, len(P), 1, 1))   
 
+        if (fill_H_He == True):
+            if ('H2' in bulk_species):
+                if ('He' in bulk_species):
+                    print("Overriding user-input H2 and He mixing ratios")
+                else:
+                    print("Overriding user-input H2 mixing ratios")
+
+                X = fill_H_He_function(P, X_input, N_species, included_species, bulk_species, param_species, He_fraction)
+            else:
+                print("Overriding user-input bulk species mixing ratios is only supported for H2 and He")
+            
+
     else:   # Alternatively, compute 4D mixing ratio array
 
         # For isochemical or gradient profiles
@@ -2072,6 +2130,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
     # Check if any mixing ratios are negative (i.e. trace species sum to > 1, so bulk < 0)
     if (np.any(X[0,:,:,:] < 0.0)): 
         
+        print("Unphysical due to negative mixing ratio")
         # Quit computations if model rejected
         return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
 
@@ -2103,9 +2162,18 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         n, r, r_up, r_low, dr = radial_profiles(P, T, g_0, R_p, P_ref, 
                                                 R_p_ref, mu, N_sectors, N_zones)
 
+        #Overrides hydrostatic equilibrium calculation of radial profile
+        #Reads directly from input
+        if r_profile == 'file_read':
+            r = r_input.reshape((len(P), 1, 1))
+            r_up = r_up_input.reshape((len(P), 1, 1))
+            r_low = r_low_input.reshape((len(P), 1, 1))
+            dr= dr_input.reshape((len(P), 1, 1))
+
      # Check if any of the values in r are negative
     if (np.any(r < 0.0)): 
-        
+        print("Unphysical due to negative radius")
+
         # Quit computations if model rejected
         return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
 
