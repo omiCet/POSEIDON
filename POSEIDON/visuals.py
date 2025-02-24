@@ -734,6 +734,146 @@ def plot_PT(planet, model, atmosphere, show_profiles = [],
 
     return fig
 
+def plot_multiple_PT(planet, model, atmospheres, 
+            PT_labels = [], log_P_min = None, log_P_max = None, T_min = None,
+            T_max = None, colours = ['darkblue'], legend_location = 'lower left',
+            ax = None):
+    '''
+    Plots multiple pressure-temperature (P-T) profiles from different atmospheres,
+    but the same planet and model. Only support 1D profiles.
+    
+    Args:
+        planet (dict): 
+            POSEIDON planet properties dictionary.
+        model (dict): 
+            POSEIDON model properties dictionary.
+        atmospheres (list of dict): 
+            List of the dictionaries containing atmospheric properties.
+		PT_labels (list of str, optional): 
+            Labels for the P-T profiles. If provided, length
+            must match the length of atmospheres.
+		log_P_min (float, optional):
+            Minimum value for the log10 pressure.
+		log_P_max (float, optional):
+            Maximum value for the log10 pressure.
+		T_min (float, optional):
+            Minimum temperature to plot.
+		T_max (float, optional):
+            Maximum temperature to plot.
+		colours (list of str, optional):
+            Colours of the plotted P-T profiles. If provided, length
+            must match the length of atmospheres.
+		legend_location (str, optional):
+            Location of the legend. Default is 'lower left'.
+        ax (matplotlib axis object, optional):
+            Matplotlib axis provided externally.
+	
+    Returns:
+		fig (matplotlib figure object):
+            The P-T profile plot.
+
+    '''
+    
+    # Unpack model and atmospheric properties
+    planet_name = planet['planet_name']
+    model_name = model['model_name']
+    pressure_lists = [atmosphere['P'] for atmosphere in atmospheres]
+    temperature_lists = [atmosphere['T'] for atmosphere in atmospheres]
+    Atmosphere_dimension = model['Atmosphere_dimension']
+
+    # Identify output directory location where the plot will be saved
+    output_dir = './POSEIDON_output/' + planet_name + '/plots/'
+
+    # If not provided, find minimum and maximum temperatures in atmosphere
+    if (T_min == None):
+        T_min = 100000 #arbitrary high value
+        for T_i in temperature_lists:
+            possible_T_min = np.floor(np.min(T_i)/100)*100 - 200.0    # Round down to nearest 100
+            if possible_T_min < T_min: T_min = possible_T_min
+
+    if (T_max == None):
+        T_max = 0
+        for T_i in temperature_lists:
+            possible_T_max = np.ceil(np.max(T_i)/100)*100 + 200.0     # Round up to nearest 100
+            if possible_T_max > T_max: T_max = possible_T_max 
+        
+    # Find range to plot
+    T_range = T_max - T_min    
+    
+    # Calculate appropriate axis spacing
+    if (T_range >= 500.0):
+        major_spacing = max(np.around((T_range/10), -2), 100.0)
+    elif (T_range < 500.0):
+        major_spacing = max(np.around((T_range/10), -1), 10.0)
+        
+    minor_spacing = major_spacing/10
+
+    # If not provided, use the min and max pressures from the first atmosphere provided
+    if (log_P_min == None):
+        log_P_min = np.log10(np.min(pressure_lists[0]))
+    if (log_P_max == None):
+        log_P_max = np.log10(np.max(pressure_lists[0]))
+    
+    # create figure
+    fig = plt.figure()
+
+    if (ax == None):
+        ax = plt.gca()
+    else:
+        ax = ax
+    
+    # Assign axis spacing
+    xmajorLocator_PT = MultipleLocator(major_spacing)
+    xminorLocator_PT = MultipleLocator(minor_spacing)
+        
+    ax.xaxis.set_major_locator(xmajorLocator_PT)
+    ax.xaxis.set_minor_locator(xminorLocator_PT)
+    
+    # Check whether colors and labels are provided properly or not, and use defaults if not
+    num_profiles = len(atmospheres)
+    if (len(colours) != num_profiles): 
+        default_colours = ['#377eb8', '#ff7f00', '#4daf4a',
+                  '#f781bf', '#a65628', '#984ea3',
+                  '#999999', '#e41a1c', '#dede00', '#000000']
+        
+        #Repeat the color list as many times as necessary to match the number of PT profiles
+        colours = (int(np.ceil(num_profiles / 10))*default_colours)[:num_profiles]
+    if len(PT_labels) != num_profiles:
+        PT_labels = ["PT profile " + str(i) for i in range(num_profiles)]
+
+
+    # Plot P-T profiles
+
+    # 1D temperature profile
+    if (Atmosphere_dimension == 1):
+        #Loop through all the PT profiles that need to be plotted
+        for i in range(num_profiles):
+            ax.semilogy(temperature_lists[i][:,0,0], pressure_lists[i], lw=1.5, color = colours[i], label = PT_labels[i])
+
+    # Higher dimension temperature profile
+    elif (Atmosphere_dimension >= 2):
+        print("Only 1D models are supported for plotting PT profiles from different atmospheres.")
+            
+    # Common plot settings for all profiles
+    ax.invert_yaxis()            
+    ax.set_xlabel(r'Temperature (K)', fontsize = 16)
+    ax.set_xlim(T_min, T_max) 
+    ax.set_ylabel(r'Pressure (bar)', fontsize = 16)
+    ax.set_ylim(np.power(10.0, log_P_max), np.power(10.0, log_P_min))  
+    ax.tick_params(labelsize=12)
+    
+    # Add legend
+    legend = ax.legend(loc=legend_location, shadow=True, prop={'size':10}, ncol=1, 
+                       frameon=False, columnspacing=1.0)
+    
+    fig.set_size_inches(9.0, 9.0)
+        
+    # Write figure to file
+    file_name = output_dir + planet_name + '_' + model_name + '_PT.pdf'
+
+    plt.savefig(file_name, bbox_inches='tight')
+
+    return fig
 
 def plot_chem(planet, model, atmosphere, plot_species = [], 
               colour_list = [], show_profiles = [],
