@@ -29,7 +29,7 @@ from .utility import create_directories, write_spectrum, read_data
 from .stellar import planck_lambda, load_stellar_pysynphot, load_stellar_pymsg, \
                      open_pymsg_grid
 from .supported_chemicals import supported_species, supported_cia, inactive_species, \
-                                 fastchem_supported_species, aerosol_supported_species
+                                 fastchem_supported_species, aerosol_supported_species, vulcan_supported_species
 from .parameters import assign_free_params, generate_state, \
                         unpack_geometry_params, unpack_cloud_params
 from .absorption import opacity_tables, store_Rayleigh_eta_LBL, extinction,\
@@ -386,7 +386,7 @@ def define_model(model_name, bulk_species, param_species,
                  log_P_slope_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
                  number_P_knots = 0, PT_penalty = False,
                  Na_K_fixed_ratio = False,
-                 reflection_up_to_5um = False, r_profile = 'auto'):
+                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = ''):
     '''
     Create the model dictionary defining the configuration of the user-specified 
     forward model or retrieval.
@@ -407,7 +407,7 @@ def define_model(model_name, bulk_species, param_species,
             slope / file_read).
         X_profile (str):
             Chosen mixing ratio profile parametrisation
-            (Options: isochem / gradient / two-gradients / lever / file_read / chem_eq).
+            (Options: isochem / gradient / two-gradients / lever / file_read / chem_eq / chem_diseq).
         cloud_model (str):
             Chosen cloud parametrisation 
             (Options: cloud-free / MacMad17 / Iceberg / Mie).
@@ -507,6 +507,9 @@ def define_model(model_name, bulk_species, param_species,
             Determines whether the radial profile is determined using hydrostatic equilibrium
             or defined by the user.
             (Options: auto / file_read)
+        diseq_grid_name (str):
+            For models using a pre-computed disequilibrium chemistry grid only. Name of 
+            specific pre-computed disequilibrium grid.
     Returns:
         model (dict):
             Dictionary containing the description of the desired POSEIDON model.
@@ -534,6 +537,26 @@ def define_model(model_name, bulk_species, param_species,
                 raise Exception("A chemical species you selected is not supported " +
                                 "for equilibrium chemistry models.\n")
     
+    # Same as for chemical equilibrium models but for VULCAN models instead
+    if (X_profile == 'chem_diseq'):
+        supported_vulcan_and_poseidon_species = np.intersect1d(np.append(supported_species, inactive_species), vulcan_supported_species)
+
+        # If param_species = ['all'] then default to all species
+        if ('all' in param_species):
+            param_species = supported_vulcan_and_poseidon_species
+
+        # Check all user-specified species are compatible with the vulcan grid
+        else:
+            if (np.any(~np.isin(param_species, supported_vulcan_and_poseidon_species)) == True):
+                raise Exception("A chemical species you selected is not supported " +
+                                "for VULCAN models.\n")
+            if not ('H' in param_species):
+                raise Exception("In VULCAN models, you must include H as a param_species.")
+
+    # Check that a species is not in both bulk and param species
+    if (np.intersect1d(bulk_species, param_species).size):
+        raise Exception("The following species are in both bulk_species and param_species: " + str(np.intersect1d(bulk_species, param_species)))
+
     # If Na_K_fixed_ratio, put K at the end of the list so that it's mixing ratio 
     # Can be appended to the end of the X_param array in 
     # profiles() in atmosphere.py 
@@ -612,7 +635,7 @@ def define_model(model_name, bulk_species, param_species,
                                       opaque_Iceberg, surface, sharp_DN_transition,
                                       reference_parameter, disable_atmosphere, 
                                       aerosol_species, log_P_slope_arr,
-                                      number_P_knots, PT_penalty)
+                                      number_P_knots, PT_penalty, diseq_grid_name)
     
     # If cloud_model = Mie, load in the cross section 
     if cloud_model == 'Mie' and aerosol_species != ['free'] and aerosol_species != ['file_read']:
@@ -660,6 +683,7 @@ def define_model(model_name, bulk_species, param_species,
              'reflection_up_to_5um' : reflection_up_to_5um,
              'PT_penalty' : PT_penalty,
              'r_profile': r_profile,
+             'diseq_grid_name': diseq_grid_name
              }
 
     return model
@@ -916,6 +940,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     Atmosphere_dimension = model['Atmosphere_dimension']
     TwoD_type = model['TwoD_type']
     param_names = model['param_names']
+    X_param_names = model['X_param_names']
     N_params_cum = model['N_params_cum']
     param_species = model['param_species']
     X_profile = model['X_profile']
@@ -937,6 +962,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     Na_K_fixed_ratio = model['Na_K_fixed_ratio']
     PT_penalty = model['PT_penalty']
     r_profile = model['r_profile']
+    diseq_grid_name = model['diseq_grid_name']
 
     # Unpack planet properties
     R_p = planet['planet_radius']
@@ -1030,9 +1056,10 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            ff_pairs, bf_species, N_sectors, N_zones, alpha, 
                            beta, phi, theta, species_vert_gradient, He_fraction,
                            T_input, X_input, P_param_set, log_P_slope_phot,
-                           log_P_slope_arr, Na_K_fixed_ratio, constant_gravity,
-                           chemistry_grid, PT_penalty, T_eq, r_profile, fill_H_He, r_input,
-                           r_up_input, r_low_input, dr_input,)
+                           log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
+                           constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
+                           fill_H_He, r_input, r_up_input, r_low_input, dr_input,
+                           X_param_names)
 
     #***** Store cloud / haze / aerosol properties *****#
 

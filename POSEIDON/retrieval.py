@@ -25,7 +25,7 @@ from .utility import write_MultiNest_results, round_sig_figs, closest_index, \
 from .core import make_atmosphere, compute_spectrum
 from .parameters import unpack_stellar_params
 from .stellar import precompute_stellar_spectra, stellar_contamination_general
-from .chemistry import load_chemistry_grid
+from .chemistry import load_chemistry_grid, load_vulcan_chemistry_grid
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -92,6 +92,8 @@ def run_retrieval(planet, star, model, opac, data, priors, wl, P,
     # Load chemistry grid (e.g. equilibrium chemistry) if option selected
     if (X_profile == 'chem_eq'):
         chemistry_grid = load_chemistry_grid(param_species, chem_grid, comm, rank)
+    elif (X_profile == 'chem_diseq'):
+        chemistry_grid = load_vulcan_chemistry_grid(param_species, chem_grid, comm, rank)
     else:
         chemistry_grid = None
 

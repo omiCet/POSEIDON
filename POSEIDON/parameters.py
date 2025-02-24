@@ -5,6 +5,7 @@ Functions related to the free parameters defining a POSEIDON model.
 
 import numpy as np
 import warnings
+from .chemistry import vulcan_grid_list
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -16,7 +17,7 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                        species_EM_gradient, species_DN_gradient, species_vert_gradient,
                        Atmosphere_dimension, opaque_Iceberg, surface,
                        sharp_DN_transition, reference_parameter, disable_atmosphere,
-                       aerosol_species, log_P_slope_arr, number_P_knots, PT_penalty):
+                       aerosol_species, log_P_slope_arr, number_P_knots, PT_penalty, diseq_grid_name):
     '''
     From the user's chosen model settings, determine which free parameters 
     define this POSEIDON model. The different types of free parameters are
@@ -110,6 +111,9 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
         PT_penalty (bool):
             If True, introduces the sigma_smooth parameter for retrievals
             (only for the Pelletier 2021 P-T profile).
+        diseq_grid_name (str):
+            For models using a pre-computed disequilibrium chemistry grid only. Name of 
+            specific pre-computed disequilibrium grid.
 
     Returns:
         params (np.array of str):
@@ -190,136 +194,138 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
 
         #***** PT profile parameters *****#
 
-        if (PT_profile not in ['isotherm', 'gradient', 'two-gradients', 'Madhu', 
-                               'slope', 'Pelletier', 'Guillot', 'Guillot_dayside',
-                               'Line', 'file_read']):
-            raise Exception("Error: unsupported P-T profile.")
+        #QUICK FIX TO MAKE RETRIEVALS WORK
+        if (X_profile not in ['chem_diseq']):
 
-        # Check profile settings are supported
-        if ((PT_profile == 'isotherm') and (PT_dim > 1)):
-            raise Exception("Cannot retrieve multiple PT profiles with an isothermal shape")
+            if (PT_profile not in ['isotherm', 'gradient', 'two-gradients', 'Madhu', 
+                                'slope', 'Pelletier', 'Guillot', 'Guillot_dayside', 'Line', 'file_read']):
+                raise Exception("Error: unsupported P-T profile.")
+
+            # Check profile settings are supported
+            if ((PT_profile == 'isotherm') and (PT_dim > 1)):
+                raise Exception("Cannot retrieve multiple PT profiles with an isothermal shape")
+                
+            if ((PT_profile == 'Madhu') and (PT_dim > 1)):
+                raise Exception("Madhusudhan & Seager (2009) profile only supported for 1D models")
             
-        if ((PT_profile == 'Madhu') and (PT_dim > 1)):
-            raise Exception("Madhusudhan & Seager (2009) profile only supported for 1D models")
-        
-        if ((PT_profile == 'Pelletier') and (PT_dim > 1)):
-            raise Exception("Pelletier (2021) profile only supported for 1D models")
-        
-        if ((PT_profile == 'Guillot') and (PT_dim > 1)):
-            raise Exception("Guillot (2010) (pRT implementation) profile only supported for 1D models")
-        
-        if ((PT_profile == 'Guillot_dayside') and (PT_dim > 1)):
-            raise Exception("Guillot (dayside) (2010) (pRT implementation) profile only supported for 1D models")
-        
-        if ((PT_profile == 'Line') and (PT_dim > 1)):
-            raise Exception("Line (2013) (platon implementation) profile only supported for 1D models")
-
-        if ((PT_profile == 'slope') and (PT_dim > 1)):
-            raise Exception("Slope profile only supported for 1D models")
+            if ((PT_profile == 'Pelletier') and (PT_dim > 1)):
+                raise Exception("Pelletier (2021) profile only supported for 1D models")
             
-        # 1D model (global average)
-        if (PT_dim == 1): 
-    
-            if (PT_profile == 'isotherm'):  
-                PT_params += ['T']
-            elif (PT_profile == 'gradient'):  
-                PT_params += ['T_high', 'T_deep']
-            elif (PT_profile == 'two-gradients'):  
-                PT_params += ['T_high', 'T_mid', 'log_P_mid', 'T_deep']
-            elif (PT_profile == 'Madhu'):     
-                PT_params += ['a1', 'a2', 'log_P1', 'log_P2', 'log_P3', 'T_ref']
-            elif (PT_profile == 'slope'):
-                PT_params += ['T_phot_PT']
-                for i in range(len(log_P_slope_arr)):
-                    PT_params += ['Delta_T_' + str(i+1)]
-            elif (PT_profile == 'Pelletier'):
-                if number_P_knots < 3:
-                    raise Exception('number_P_knots must be at least 3. (Captures top, bottom, middle pressures in log space)')
-                for i in range(number_P_knots):
-                    PT_params += ['T_' + str(i+1)]
-                if PT_penalty == True:
-                    PT_params += ['sigma_s']
-            elif (PT_profile == 'Guillot'):
-                PT_params += ['log_kappa_IR', 'log_gamma', 'T_int', 'T_equ']
-            elif (PT_profile == 'Guillot_dayside'):
-                PT_params += ['log_kappa_IR', 'log_gamma', 'T_int', 'T_equ']
-            elif (PT_profile == 'Line'):
-                PT_params += ['log_kappa_IR', 'log_gamma', 'log_gamma_2', 
-                              'alpha_Line', 'beta_Line', 'T_int']
+            if ((PT_profile == 'Guillot') and (PT_dim > 1)):
+                raise Exception("Guillot (2010) (pRT implementation) profile only supported for 1D models")
             
-        # 2D model (asymmetric terminator or day-night transition)
-        elif (PT_dim == 2):
-
-            # Check that a 2D model type has been specified 
-            if (TwoD_type not in ['D-N', 'E-M']):
-                raise Exception("Error: 2D model type is not 'D-N' or 'E-M'.")
+            if ((PT_profile == 'Guillot_dayside') and (PT_dim > 1)):
+                raise Exception("Guillot (dayside) (2010) (pRT implementation) profile only supported for 1D models")
             
-            # Parametrisation with separate morning / evening or day / night profiles
-            if (TwoD_param_scheme == 'absolute'):
+            if ((PT_profile == 'Line') and (PT_dim > 1)):
+                raise Exception("Line (2013) (platon implementation) profile only supported for 1D models")
 
-                if (TwoD_type == 'E-M'):
-                    if (PT_profile == 'gradient'):            
-                        PT_params += ['T_Even_high', 'T_Morn_high', 'T_deep']
-                    elif (PT_profile == 'two-gradients'):   
-                        PT_params += ['T_Even_high', 'T_Even_mid', 'T_Morn_high',
-                                    'T_Morn_mid', 'log_P_mid', 'T_deep']
-
-                elif (TwoD_type == 'D-N'):
-                    if (PT_profile == 'gradient'):            
-                        PT_params += ['T_Day_high', 'T_Night_high', 'T_deep']
-                    elif (PT_profile == 'two-gradients'):   
-                        PT_params += ['T_Day_high', 'T_Day_mid', 'T_Night_high',
-                                    'T_Night_mid', 'log_P_mid', 'T_deep']
-    
-            # Difference parameter prescription from MacDonald & Lewis (2022)
-            elif (TwoD_param_scheme == 'difference'):
-
-                if (TwoD_type == 'E-M'):
-                    if (PT_profile == 'gradient'):
-                        PT_params += ['T_bar_term_high', 'Delta_T_term_high', 'T_deep']
-                    elif (PT_profile == 'two-gradients'):            
-                        PT_params += ['T_bar_term_high', 'T_bar_term_mid', 'Delta_T_term_high', 
-                                    'Delta_T_term_mid', 'log_P_mid', 'T_deep']
-
-                elif (TwoD_type == 'D-N'):
-                    if (PT_profile == 'gradient'):            
-                        PT_params += ['T_bar_DN_high', 'Delta_T_DN_high', 'T_deep']
-                    elif (PT_profile == 'two-gradients'):            
-                        PT_params += ['T_bar_DN_high', 'T_bar_DN_mid', 'Delta_T_DN_high', 
-                                    'Delta_T_DN_mid', 'log_P_mid', 'T_deep']
-
-            # Gradient parameter prescription from MacDonald & Lewis (2023)
-            elif (TwoD_param_scheme == 'gradient'):
-
-                if (TwoD_type == 'D-N'):
-                    if (PT_profile == 'gradient'):
-                        PT_params += ['T_bar_DN_high', 'Grad_theta_T_high', 'T_deep']
-                    elif (PT_profile == 'two-gradients'):            
-                        PT_params += ['T_bar_DN_high', 'T_bar_DN_mid', 'Grad_theta_T_high', 
-                                    'Grad_theta_T_mid', 'log_P_mid', 'T_deep']
+            if ((PT_profile == 'slope') and (PT_dim > 1)):
+                raise Exception("Slope profile only supported for 1D models")
+                
+            # 1D model (global average)
+            if (PT_dim == 1): 
         
-        # 3D model (asymmetric terminator + day-night transition)
-        elif (PT_dim == 3):
+                if (PT_profile == 'isotherm'):  
+                    PT_params += ['T']
+                elif (PT_profile == 'gradient'):  
+                    PT_params += ['T_high', 'T_deep']
+                elif (PT_profile == 'two-gradients'):  
+                    PT_params += ['T_high', 'T_mid', 'log_P_mid', 'T_deep']
+                elif (PT_profile == 'Madhu'):     
+                    PT_params += ['a1', 'a2', 'log_P1', 'log_P2', 'log_P3', 'T_ref']
+                elif (PT_profile == 'slope'):
+                    PT_params += ['T_phot_PT']
+                    for i in range(len(log_P_slope_arr)):
+                        PT_params += ['Delta_T_' + str(i+1)]
+                elif (PT_profile == 'Pelletier'):
+                    if number_P_knots < 3:
+                        raise Exception('number_P_knots must be at least 3. (Captures top, bottom, middle pressures in log space)')
+                    for i in range(number_P_knots):
+                        PT_params += ['T_' + str(i+1)]
+                    if PT_penalty == True:
+                        PT_params += ['sigma_s']
+                elif (PT_profile == 'Guillot'):
+                    PT_params += ['log_kappa_IR', 'log_gamma', 'T_int', 'T_equ']
+                elif (PT_profile == 'Guillot_dayside'):
+                    PT_params += ['log_kappa_IR', 'log_gamma', 'T_int', 'T_equ']
+                elif (PT_profile == 'Line'):
+                    PT_params += ['log_kappa_IR', 'log_gamma', 'log_gamma_2', 
+                                'alpha_Line', 'beta_Line', 'T_int']
+                
+            # 2D model (asymmetric terminator or day-night transition)
+            elif (PT_dim == 2):
 
-            if (PT_profile == 'gradient'):            
-                PT_params += ['T_bar_term_high', 'Delta_T_term_high', 'Delta_T_DN_high', 'T_deep']
-            elif (PT_profile == 'two-gradients'):            
-                PT_params += ['T_bar_term_high', 'T_bar_term_mid', 'Delta_T_term_high', 
-                            'Delta_T_term_mid', 'Delta_T_DN_high', 'Delta_T_DN_mid', 
-                            'log_P_mid', 'T_deep']
+                # Check that a 2D model type has been specified 
+                if (TwoD_type not in ['D-N', 'E-M']):
+                    raise Exception("Error: 2D model type is not 'D-N' or 'E-M'.")
+                
+                # Parametrisation with separate morning / evening or day / night profiles
+                if (TwoD_param_scheme == 'absolute'):
+
+                    if (TwoD_type == 'E-M'):
+                        if (PT_profile == 'gradient'):            
+                            PT_params += ['T_Even_high', 'T_Morn_high', 'T_deep']
+                        elif (PT_profile == 'two-gradients'):   
+                            PT_params += ['T_Even_high', 'T_Even_mid', 'T_Morn_high',
+                                        'T_Morn_mid', 'log_P_mid', 'T_deep']
+
+                    elif (TwoD_type == 'D-N'):
+                        if (PT_profile == 'gradient'):            
+                            PT_params += ['T_Day_high', 'T_Night_high', 'T_deep']
+                        elif (PT_profile == 'two-gradients'):   
+                            PT_params += ['T_Day_high', 'T_Day_mid', 'T_Night_high',
+                                        'T_Night_mid', 'log_P_mid', 'T_deep']
+        
+                # Difference parameter prescription from MacDonald & Lewis (2022)
+                elif (TwoD_param_scheme == 'difference'):
+
+                    if (TwoD_type == 'E-M'):
+                        if (PT_profile == 'gradient'):
+                            PT_params += ['T_bar_term_high', 'Delta_T_term_high', 'T_deep']
+                        elif (PT_profile == 'two-gradients'):            
+                            PT_params += ['T_bar_term_high', 'T_bar_term_mid', 'Delta_T_term_high', 
+                                        'Delta_T_term_mid', 'log_P_mid', 'T_deep']
+
+                    elif (TwoD_type == 'D-N'):
+                        if (PT_profile == 'gradient'):            
+                            PT_params += ['T_bar_DN_high', 'Delta_T_DN_high', 'T_deep']
+                        elif (PT_profile == 'two-gradients'):            
+                            PT_params += ['T_bar_DN_high', 'T_bar_DN_mid', 'Delta_T_DN_high', 
+                                        'Delta_T_DN_mid', 'log_P_mid', 'T_deep']
+
+                # Gradient parameter prescription from MacDonald & Lewis (2023)
+                elif (TwoD_param_scheme == 'gradient'):
+
+                    if (TwoD_type == 'D-N'):
+                        if (PT_profile == 'gradient'):
+                            PT_params += ['T_bar_DN_high', 'Grad_theta_T_high', 'T_deep']
+                        elif (PT_profile == 'two-gradients'):            
+                            PT_params += ['T_bar_DN_high', 'T_bar_DN_mid', 'Grad_theta_T_high', 
+                                        'Grad_theta_T_mid', 'log_P_mid', 'T_deep']
+            
+            # 3D model (asymmetric terminator + day-night transition)
+            elif (PT_dim == 3):
+
+                if (PT_profile == 'gradient'):            
+                    PT_params += ['T_bar_term_high', 'Delta_T_term_high', 'Delta_T_DN_high', 'T_deep']
+                elif (PT_profile == 'two-gradients'):            
+                    PT_params += ['T_bar_term_high', 'T_bar_term_mid', 'Delta_T_term_high', 
+                                'Delta_T_term_mid', 'Delta_T_DN_high', 'Delta_T_DN_mid', 
+                                'log_P_mid', 'T_deep']
             
         N_PT_params = len(PT_params)   # Store number of P-T profile parameters
         params += PT_params            # Add P-T parameter names to combined list
         
         #***** Mixing ratio parameters *****#
 
-        if (X_profile not in ['isochem', 'gradient', 'two-gradients', 'file_read', 'lever', 'chem_eq']):
+        if (X_profile not in ['isochem', 'gradient', 'two-gradients', 'file_read', 'lever', 'chem_eq', 'chem_diseq']):
             raise Exception("Error: unsupported mixing ratio profile.")
         
         if (X_profile == 'lever') and (X_dim != 1):
             raise Exception("Error: Level profile currently only implemented for 1D atmospheres.")
             
-        if X_profile != 'chem_eq':
+        if X_profile not in ['chem_eq', 'chem_diseq']:
         
             # Create list of mixing ratio free parameters
             for species in param_species:
@@ -527,9 +533,21 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                         else:
                             X_params += ['log_' + species]
     
-        # If the X profile is set to chem_eq, then we have only CO and log_met
-        else:
+        # If the X profile is set to chem_eq, then we have only C_to_O and log_Met
+        elif X_profile == 'chem_eq':
             X_params = ['C_to_O','log_Met']
+
+        elif X_profile == 'chem_diseq':
+            if diseq_grid_name == "VULCAN_test":
+                X_params = ['log_kappa_IR', 'T_equ']
+                PT_params = []
+            if diseq_grid_name == "VULCAN_Grid1.1":
+                X_params = ['log_kappa_IR', 'T_equ', "C_O", "log_met"]
+            # Add in parameters for additional grids here
+            else: 
+                raise Exception("Error: unsupported VULCAN grid.")
+
+        else: raise Exception("Error: unsupported mixing ratio profile.")
                 
         N_species_params = len(X_params)   # Store number of mixing ratio parameters
         params += X_params                 # Add mixing ratio parameter names to combined list
@@ -886,7 +904,7 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
             (Options: isotherm / gradient / two-gradients / Madhu / slope / file_read).
         X_profile (str):
             Chosen mixing ratio profile parametrisation
-            (Options: isochem / gradient / two-gradients / file_read / chem_eq).
+            (Options: isochem / gradient / two-gradients / file_read / chem_eq / chem_diseq).
         TwoD_type (str):
             For 2D models, specifies whether the model considers day-night
             gradients or evening-morning gradients
@@ -944,6 +962,8 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
     elif (X_profile == 'file_read'):   # User provided file
         len_X = 0
     elif (X_profile == 'chem_eq'):   # Chemical equilibrium 
+        len_X = 0
+    elif (X_profile == 'chem_diseq'): #Chemical disequilibrium with VULCAN
         len_X = 0
     
     # Store number of parametrised chemical species in model
@@ -1082,7 +1102,7 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
             
     #***** Process mixing ratio parameters into mixing ratio state array *****#
     
-    if X_profile != 'chem_eq':
+    if X_profile not in ['chem_eq', 'chem_diseq']:
 
         # 1D atmosphere
         if (X_dim == 1):
@@ -1488,7 +1508,7 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
                     log_X_state[q,6] = log_P_X_mid
                     log_X_state[q,7] = log_X_deep
 
-    # If it is chem_eq, then we need the 
+    # If it is chem_eq or chem_diseq, then we need the 
     else:
         log_X_state = log_X_in
                 

@@ -13,7 +13,7 @@ from numba.core.decorators import jit
 from .supported_chemicals import inactive_species
 from .species_data import masses
 from .utility import prior_index
-from .chemistry import interpolate_log_X_grid
+from .chemistry import interpolate_log_X_grid, interpolate_vulcan_log_X_grid
 
 
 @jit(nopython = True)
@@ -1736,7 +1736,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
              active_species, CIA_pairs, ff_pairs, bf_species, N_sectors, 
              N_zones, alpha, beta, phi, theta, species_vert_gradient, 
              He_fraction, T_input, X_input, P_param_set, 
-             log_P_slope_phot, log_P_slope_arr, Na_K_fixed_ratio,
+             log_P_slope_phot, log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name,
              constant_gravity = False, chemistry_grid = None,
              PT_penalty = False, T_eq = None, r_profile = 'auto', fill_H_He = False,
              r_input = [], r_up_input = [], r_low_input = [], dr_input = [], X_param_names = [], 
@@ -1765,7 +1765,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             (Options: isotherm / gradient / two-gradients / Madhu / slope / file_read).
         X_profile (str):
             Chosen mixing ratio profile parametrisation
-            (Options: isochem / gradient / two-gradients / file_read).
+            (Options: isochem / gradient / two-gradients / file_read / chem_diseq).
         PT_state (np.array of float):
             P-T profile state array.
         P_ref (float):
@@ -1819,6 +1819,9 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             parameters are defined (log bar).
         Na_K_fixed_ratio (bool):
             If True, sets log_K = 0.1 * log_Na.
+        diseq_grid_name (str):
+            For models using a pre-computed disequilibrium chemistry grid only. Name of 
+            specific pre-computed disequilibrium grid.
         constant_gravity (bool):
             If True, disable inverse square law gravity (only for testing).
         chemistry_grid (dict):
@@ -1863,168 +1866,172 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
     
     '''
 
-    # For an isothermal profile
-    if (PT_profile == 'isotherm'):
-        
-        # Unpack P-T profile parameters
-        T_iso = PT_state[0]
-    
-        # Initialise temperature array
-        T_rough = T_iso * np.ones(shape=(len(P), 1, 1)) # 1D profile => N_sectors = N_zones = 1
-        
-        # Gaussian smooth P-T profile
-        T = T_rough   # No need to Gaussian smooth an isothermal profile
+    # QUICK FIX TO GET RETRIEVALS TO WORK
+    if (X_profile != "chem_diseq"):
 
-    # For the gradient profiles (1D, 2D, or 3D)
-    elif (PT_profile == 'gradient'):
-        
-        # Unpack P-T profile parameters
-        T_bar_term, Delta_T_term, Delta_T_DN, T_deep = PT_state
-        
-        # Reject if T_Morning > T_Evening or T_Night > T_day
-        if ((Delta_T_term < 0.0) or (Delta_T_DN < 0.0)): 
+        # For an isothermal profile
+        if (PT_profile == 'isotherm'):
             
-            # Quit computations if model rejected
-            return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
+            # Unpack P-T profile parameters
+            T_iso = PT_state[0]
         
-        # If P-T parameters valid
-        else:
+            # Initialise temperature array
+            T_rough = T_iso * np.ones(shape=(len(P), 1, 1)) # 1D profile => N_sectors = N_zones = 1
             
-            # Compute unsmoothed temperature field
-            T_rough = compute_T_field_gradient(P, T_bar_term, Delta_T_term, 
-                                               Delta_T_DN, T_deep, N_sectors, 
-                                               N_zones, alpha, beta, phi, theta)
+            # Gaussian smooth P-T profile
+            T = T_rough   # No need to Gaussian smooth an isothermal profile
 
-        # Gaussian smooth P-T profile
-        T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
+        # For the gradient profiles (1D, 2D, or 3D)
+        elif (PT_profile == 'gradient'):
+            
+            # Unpack P-T profile parameters
+            T_bar_term, Delta_T_term, Delta_T_DN, T_deep = PT_state
+            
+            # Reject if T_Morning > T_Evening or T_Night > T_day
+            if ((Delta_T_term < 0.0) or (Delta_T_DN < 0.0)): 
+                
+                # Quit computations if model rejected
+                return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
+            
+            # If P-T parameters valid
+            else:
+                
+                # Compute unsmoothed temperature field
+                T_rough = compute_T_field_gradient(P, T_bar_term, Delta_T_term, 
+                                                Delta_T_DN, T_deep, N_sectors, 
+                                                N_zones, alpha, beta, phi, theta)
 
-    # For the two-gradients profiles (1D, 2D, or 3D)
-    elif (PT_profile == 'two-gradients'):
-        
-        # Unpack P-T profile parameters
-        T_bar_term_high, T_bar_term_mid, \
-        Delta_T_term_high, Delta_T_term_mid, \
-        Delta_T_DN_high, Delta_T_DN_mid, log_P_mid, T_deep = PT_state
-        
-        # Reject if T_Morning > T_Evening or T_Night > T_day
-        if (((Delta_T_term_high < 0.0) or (Delta_T_DN_high < 0.0)) or
-            ((Delta_T_term_mid < 0.0) or (Delta_T_DN_mid < 0.0))): 
-            
-            # Quit computations if model rejected
-            return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
-        
-        # If P-T parameters valid
-        else:
-            
-            # Compute unsmoothed temperature field
-            T_rough = compute_T_field_two_gradients(P, T_bar_term_high, T_bar_term_mid,
-                                                    Delta_T_term_high, Delta_T_term_mid, 
-                                                    Delta_T_DN_high, Delta_T_DN_mid,
-                                                    log_P_mid, T_deep, N_sectors, 
-                                                    N_zones, alpha, beta, phi, theta)
+            # Gaussian smooth P-T profile
+            T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
 
-        # Gaussian smooth P-T profile
-        T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
-        
-    # For the Madhusudhan & Seager (2009) profile (1D only)
-    elif (PT_profile == 'Madhu'):
-        
-        # Unpack P-T profile parameters
-        a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
-        
-        # Profile requires P3 > P2 and P3 > P1, reject otherwise
-        if ((log_P3 < log_P2) or (log_P3 < log_P1)):
+        # For the two-gradients profiles (1D, 2D, or 3D)
+        elif (PT_profile == 'two-gradients'):
             
-            # Quit computations if model rejected
-            return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
-        
-        # If P-T parameters valid
-        else:
+            # Unpack P-T profile parameters
+            T_bar_term_high, T_bar_term_mid, \
+            Delta_T_term_high, Delta_T_term_mid, \
+            Delta_T_DN_high, Delta_T_DN_mid, log_P_mid, T_deep = PT_state
             
+            # Reject if T_Morning > T_Evening or T_Night > T_day
+            if (((Delta_T_term_high < 0.0) or (Delta_T_DN_high < 0.0)) or
+                ((Delta_T_term_mid < 0.0) or (Delta_T_DN_mid < 0.0))): 
+                
+                # Quit computations if model rejected
+                return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
+            
+            # If P-T parameters valid
+            else:
+                
+                # Compute unsmoothed temperature field
+                T_rough = compute_T_field_two_gradients(P, T_bar_term_high, T_bar_term_mid,
+                                                        Delta_T_term_high, Delta_T_term_mid, 
+                                                        Delta_T_DN_high, Delta_T_DN_mid,
+                                                        log_P_mid, T_deep, N_sectors, 
+                                                        N_zones, alpha, beta, phi, theta)
+
+            # Gaussian smooth P-T profile
+            T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
+            
+        # For the Madhusudhan & Seager (2009) profile (1D only)
+        elif (PT_profile == 'Madhu'):
+            
+            # Unpack P-T profile parameters
+            a1, a2, log_P1, log_P2, log_P3, T_set = PT_state
+            
+            # Profile requires P3 > P2 and P3 > P1, reject otherwise
+            if ((log_P3 < log_P2) or (log_P3 < log_P1)):
+                
+                # Quit computations if model rejected
+                return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
+            
+            # If P-T parameters valid
+            else:
+                
+                # Compute unsmoothed temperature profile
+                T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, 
+                                        T_set, P_param_set)
+
+            # Gaussian smooth P-T profile
+            T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
+
+        # For the Piette & Madhusudhan (2020) profile (1D only)
+        elif (PT_profile == 'slope'):
+            
+            # Unpack P-T profile parameters
+            T_phot = PT_state[0]
+            Delta_T_arr = np.array(PT_state[1:])
+                
             # Compute unsmoothed temperature profile
-            T_rough = compute_T_Madhu(P, a1, a2, log_P1, log_P2, log_P3, 
-                                      T_set, P_param_set)
+            T_rough = compute_T_slope(P, T_phot, Delta_T_arr, log_P_slope_phot,
+                                    log_P_slope_arr)
 
-        # Gaussian smooth P-T profile
-        T = gauss_conv(T_rough, sigma=3, axis=0, mode='nearest')
+            # Find how many layers corresponds to 0.3 dex smoothing width
+            smooth_width = round(0.3/(((np.log10(P[0]) - np.log10(P[-1]))/len(P))))
 
-    # For the Piette & Madhusudhan (2020) profile (1D only)
-    elif (PT_profile == 'slope'):
-        
-        # Unpack P-T profile parameters
-        T_phot = PT_state[0]
-        Delta_T_arr = np.array(PT_state[1:])
+            # Gaussian smooth P-T profile
+            T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode='nearest')
             
-        # Compute unsmoothed temperature profile
-        T_rough = compute_T_slope(P, T_phot, Delta_T_arr, log_P_slope_phot,
-                                  log_P_slope_arr)
-
-        # Find how many layers corresponds to 0.3 dex smoothing width
-        smooth_width = round(0.3/(((np.log10(P[0]) - np.log10(P[-1]))/len(P))))
-
-        # Gaussian smooth P-T profile
-        T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode='nearest')
-        
-    # For the Pelletier (2021) profile (1D only)
-    elif (PT_profile == 'Pelletier'):
-        
-        # Unpack P-T profile parameters
-        if PT_penalty == False:
-            T_points = PT_state
-        
-        # If PT_penalty = True, then the last parameter is sigma_s
-        else:
-            T_points = PT_state[:-1]
+        # For the Pelletier (2021) profile (1D only)
+        elif (PT_profile == 'Pelletier'):
             
-        # Compute unsmoothed temperature profile
-        T_rough = compute_T_Pelletier(P, T_points)
-        T = T_rough
+            # Unpack P-T profile parameters
+            if PT_penalty == False:
+                T_points = PT_state
+            
+            # If PT_penalty = True, then the last parameter is sigma_s
+            else:
+                T_points = PT_state[:-1]
+                
+            # Compute unsmoothed temperature profile
+            T_rough = compute_T_Pelletier(P, T_points)
+            T = T_rough
 
-        # Find how many layers corresponds to 0.3 dex smoothing width
-        #smooth_width = round(0.3/(((np.log10(P[0]) - np.log10(P[-1]))/len(P))))
+            # Find how many layers corresponds to 0.3 dex smoothing width
+            #smooth_width = round(0.3/(((np.log10(P[0]) - np.log10(P[-1]))/len(P))))
 
-        # Gaussian smooth P-T profile
-        #T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode='nearest')
+            # Gaussian smooth P-T profile
+            #T = gauss_conv(T_rough, sigma=smooth_width, axis=0, mode='nearest')
 
-    # For the Guillot (2010) profile (1D only)
-    elif PT_profile == 'Guillot':
+        # For the Guillot (2010) profile (1D only)
+        elif PT_profile == 'Guillot':
 
-        log_kappa_IR,log_gamma,T_int,T_equ = PT_state
+            log_kappa_IR,log_gamma,T_int,T_equ = PT_state
 
-        # T_equ is NOT T_eq
+            # T_equ is NOT T_eq
 
-        T_rough = compute_T_Guillot(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
+            T_rough = compute_T_Guillot(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
 
-        T = T_rough
+            T = T_rough
 
-    # For the Guillot dayside (2010) profile (1D only)
-    elif PT_profile == 'Guillot_dayside':
+        # For the Guillot dayside (2010) profile (1D only)
+        elif PT_profile == 'Guillot_dayside':
 
-        log_kappa_IR, log_gamma, T_int, T_equ = PT_state
+            log_kappa_IR, log_gamma, T_int, T_equ = PT_state
 
-        # T_equ is NOT T_eq
+            # T_equ is NOT T_eq
 
-        T_rough = compute_T_Guillot_dayside(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
+            T_rough = compute_T_Guillot_dayside(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
 
-        T = T_rough
+            T = T_rough
 
-    # For the Line (2013) profile (1D only)
-    elif PT_profile == 'Line':
+        # For the Line (2013) profile (1D only)
+        elif PT_profile == 'Line':
 
-        log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int = PT_state
+            log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int = PT_state
 
-        T_rough = compute_T_Line(P, g_0, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int)
+            T_rough = compute_T_Line(P, g_0, T_eq, log_kappa_IR, log_gamma, log_gamma_2, alpha, beta, T_int)
 
-        T = T_rough
+            T = T_rough
 
-    # Read user provided P-T profile
-    elif (PT_profile == 'file_read'):
+        # Read user provided P-T profile
+        elif (PT_profile == 'file_read'):
 
-        # Initialise temperature array
-        T_rough = T_input.reshape((len(P), 1, 1))   # 1D profile => N_sectors = N_zones = 1
+            # Initialise temperature array
+            T_rough = T_input.reshape((len(P), 1, 1))   # 1D profile => N_sectors = N_zones = 1
+            
+            # Gaussian smooth P-T profile
+            T = T_rough   # No need to Gaussian smooth a user profile
         
-        # Gaussian smooth P-T profile
-        T = T_rough   # No need to Gaussian smooth a user profile
 
     # Load number of distinct chemical species in model atmosphere
     N_species = len(bulk_species) + len(param_species)
@@ -2105,6 +2112,41 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             else:
                 raise Exception('Chemical Equilibrium only supports 1D Isothermal PT or Gradient PT (for now)')
             '''
+        
+        elif (X_profile == 'chem_diseq'):
+
+            if (chemistry_grid == None): 
+                raise Exception("Error: no chemistry grid loaded for a disequilibrium model")
+
+            log_X_input = interpolate_vulcan_log_X_grid(chemistry_grid, X_param_names, log_X_state, 
+                                                     np.log10(P), param_species, return_dict = False)
+            
+            X_input = 10**log_X_input
+            X_param = X_input.reshape((len(param_species), len(P), 1, 1))
+
+            #Set PT profile parameters as well
+            if (diseq_grid_name == "VULCAN_test"):
+                log_gamma = -1.0
+                T_int = 358
+
+                #For VULCAN_test, the PT parameters are the X parameters
+                log_kappa_IR,T_equ = log_X_state
+                
+                T_rough = compute_T_Guillot(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
+
+                T = T_rough
+
+            if (diseq_grid_name == "VULCAN_Grid1.1"):
+                log_gamma = -1.0
+                T_int = 358
+
+                #For VULCAN_Grid1.1, only the first two X parameters are PT parameters
+                log_kappa_IR,T_equ,_,_ = log_X_state
+
+                T_rough = compute_T_Guillot(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
+
+                T = T_rough
+
 
         # Gaussian smooth any profiles with a vertical profile
         for q, species in enumerate(param_species):
