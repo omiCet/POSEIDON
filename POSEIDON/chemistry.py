@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 from mpi4py import MPI
 from scipy.interpolate import RegularGridInterpolator
+import re
 
 from .utility import shared_memory_array
 from .supported_chemicals import supported_species, fastchem_supported_species, vulcan_supported_species, inactive_species
@@ -333,48 +334,33 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
         # Open chemistry grid HDF5 file
         database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')
 
-        # Load the dimensions of the grid
-        log_kappa_list = np.array(database['Info/log_kappa_list'])
-        log_gamma_list = np.array(database['Info/log_gamma_list'])
-        T_equ_list = np.array(database['Info/T_equ_list'])
-        log_kzz_list = np.array(database['Info/log_kzz_list'])
-        C_O_list = np.array(database['Info/C_O_list'])
-        log_met_list = np.array(database['Info/log_met_list'])
-        log_fuv_list = np.array(database['Info/log_fuv_list'])
-        log_nuv_list = np.array(database['Info/log_nuv_list'])
-
-        # Load other info
-        pressures = np.array(database['Info/pressures'])
-        temp_profiles = np.array(database['Info/temp_profiles'])
+        # Determine the axes of the grid and load in the corresponding dimensions
+        property_names = np.array(re.findall(r"[_\w]+", database['Misc_info/property_names'].asstr()[0]))
+        grid_lists = np.array([database[f'Dimensions/{prop}_list'][...] for prop in property_names], dtype=np.ndarray)
 
         # Find sizes of each dimension
-        kappa_num, gamma_num, \
-        T_num, kzz_num, C_O_num, \
-        met_num, fuv_num, nuv_num, P_num = len(log_kappa_list), len(log_gamma_list), len(T_equ_list), len(log_kzz_list), \
-                                    len(C_O_list), len(log_met_list), len(log_fuv_list), len(log_nuv_list), len(pressures)
+        dim_sizes = np.array([len(list) for list in grid_lists])
 
-        try:
-            conv_flags = np.array(database['Info/conv_flags'])
-            conv_flags = conv_flags.reshape((kappa_num, gamma_num, T_num, kzz_num, C_O_num, met_num, fuv_num, nuv_num))
-        except:
-            conv_flags = None
+        # Load other info
+        pressures = np.array(database['Misc_info/pressures'])
+        P_num = len(pressures)
+        temp_profiles = np.array(database['Misc_info/temp_profiles'])
+        conv_flags = np.array(database['Misc_info/conv_flags'])
+        conv_flags = conv_flags.reshape(dim_sizes)
 
         # Check that all dimensions are strictly increasing
-        for list in [log_kappa_list, log_gamma_list, T_equ_list, log_kzz_list, C_O_list, log_met_list, log_fuv_list, log_nuv_list]:
-            for i in range(1, len(list)):
-                if list[i] < list[i-1]:
-                    raise Exception("Error: values along each dimension of the grid must be provided in strictly increasing order")
+        for list in grid_lists:
+            if not np.all(list[:-1] <= list[1:]):
+                raise Exception("Error: values along each dimension of the grid must be provided in strictly increasing order")
         # Check that pressure is strictly decreasing
-        for i in range(1, len(pressures)):
-            if pressures[i] < pressures[i-1]:
+        if not np.all(pressures[:-1] >= pressures[1:]):
                 raise Exception("Error: pressures must be provided in strictly decreasing order")
 
         # Store number of chemical species
         N_species = len(chemical_species)
 
         # Create array to store the log mixing ratios from the grid 
-        log_X_grid, _ = shared_memory_array(rank, comm, (N_species, kappa_num, gamma_num, T_num, kzz_num, 
-                                                         C_O_num, met_num, fuv_num, nuv_num, P_num))
+        log_X_grid, _ = shared_memory_array(rank, comm, (N_species, *dim_sizes, P_num))
         
         # Only first core needs to load the mixing ratios into shared memory
         if (rank == 0):
@@ -384,10 +370,10 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
 
                 # Load grid for species q, then reshape into a 4D numpy array
                 array = np.array(database[species+'/log(X)']) #database[species+'/log(X)'] is a 2D array; axis 0 = runs, axis 1 = pressure
-                array = array.reshape(kappa_num, gamma_num, T_num, kzz_num, C_O_num, met_num, fuv_num, nuv_num, P_num)
+                array = array.reshape(*dim_sizes, P_num)
 
                 # Package grid for species q into combined array
-                log_X_grid[q,:,:,:,:,:,:,:,:,:] = array
+                log_X_grid[q,...] = array
 
         # Close HDF5 file
         database.close()
@@ -396,11 +382,8 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
         comm.Barrier()
 
         # Package atmosphere properties
-        chemistry_grid = {'grid': grid, 'log_X_grid': log_X_grid, 'pressures': pressures, 'temp_profiles': temp_profiles, 'species': chemical_species,
-                          'log_kappa_list': log_kappa_list, 'log_gamma_list': log_gamma_list, 'T_equ_list': T_equ_list, 'log_kzz_list': log_kzz_list, 
-                        'C_O_list': C_O_list, 'log_met_list': log_met_list, 'log_fuv_list': log_fuv_list, 'log_nuv_list': log_nuv_list, 'conv_flags':
-                        conv_flags
-                        }
+        chemistry_grid = {'grid': grid, 'log_X_grid': log_X_grid, 'pressures': pressures, 'temp_profiles': temp_profiles, 'conv_flags':
+                        conv_flags, 'species': chemical_species, 'property_names': property_names, 'grid_lists': grid_lists}
 
         return chemistry_grid
 
@@ -447,19 +430,11 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
     grid = chemistry_grid['grid']
     log_X_grid = chemistry_grid['log_X_grid']
     log_pressures_list = np.log10(chemistry_grid['pressures'])
-    log_kappa_list = chemistry_grid['log_kappa_list']
-    log_gamma_list = chemistry_grid['log_gamma_list']
-    T_equ_list = chemistry_grid['T_equ_list']
-    log_kzz_list = chemistry_grid['log_kzz_list']
-    C_O_list = chemistry_grid['C_O_list']
-    log_met_list = chemistry_grid['log_met_list']
-    log_fuv_list = chemistry_grid['log_fuv_list']
-    log_nuv_list = chemistry_grid['log_nuv_list']
     conv_flags = chemistry_grid['conv_flags']
+    property_names = chemistry_grid['property_names']
+    grid_lists = chemistry_grid['grid_lists']
 
-    # Store names of the properties, the lists of their values in the grid, the values input by the user, the lengths of the inputs
-    property_names = np.array(["log_kappa_IR", "log_gamma", "T_equ", "log_kzz", "C_O", "log_met", "delta_log_fuv", "delta_log_nuv"])
-    grid_lists = np.array([log_kappa_list, log_gamma_list, T_equ_list, log_kzz_list, C_O_list, log_met_list, log_fuv_list, log_nuv_list], dtype = np.ndarray)
+    # Number of values passed to the function along each axis of the grid
     input_lens = [np.size(elem) for elem in param_values]
     max_len = max(input_lens)
 
@@ -483,8 +458,7 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
         raise Exception("Log pressures for the profiles in the input chemistry grid must be strictly decreasing.")
 
     # Determine which axes only have one value
-    axes_lens = np.array([len(log_kappa_list), len(log_gamma_list), len(T_equ_list), len(log_kzz_list), len(C_O_list), 
-                      len(log_met_list), len(log_fuv_list), len(log_nuv_list)])
+    axes_lens = np.array([len(list) for list in grid_lists])
     one_val_only = np.array(axes_lens < 2, bool)
 
     # Verify that the axes with more than one value are given in param_names, and fix if not in the same order
