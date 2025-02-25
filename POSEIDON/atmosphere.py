@@ -1740,7 +1740,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
              constant_gravity = False, chemistry_grid = None,
              PT_penalty = False, T_eq = None, r_profile = 'auto', fill_H_He = False,
              r_input = [], r_up_input = [], r_low_input = [], dr_input = [], X_param_names = [], 
-             ):
+             use_conv_flag = True):
     '''
     Main function to calculate the vertical profiles in each atmospheric 
     column. The profiles cover the temperature, number density, mean molecular 
@@ -1835,6 +1835,11 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         fill_H_He (bool):
             Applies when mixing ratio profiles are input by the user. 
             If True, ignores user-provided H and He and fills them in as bulk species.
+        use_conv_flag (bool):
+            Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
+            rejects models if they are adjacent to or between points in the grid that did not 
+            converge.
+
     
     Returns:
         T (3D np.array of float):
@@ -2118,11 +2123,18 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             if (chemistry_grid == None): 
                 raise Exception("Error: no chemistry grid loaded for a disequilibrium model")
 
-            log_X_input = interpolate_vulcan_log_X_grid(chemistry_grid, X_param_names, log_X_state, 
-                                                     np.log10(P), param_species, return_dict = False)
+            log_X_input, conv_flag = interpolate_vulcan_log_X_grid(chemistry_grid, X_param_names, log_X_state, 
+                                                     np.log10(P), param_species, False, use_conv_flag)
             
             X_input = 10**log_X_input
             X_param = X_input.reshape((len(param_species), len(P), 1, 1))
+
+            if use_conv_flag:
+                #check convergence flag and reject model if not converged
+                if (conv_flag < 1): 
+                    print("Rejected due to failure of VULCAN to converge")
+                    print("Parameters: " + str(log_X_state))
+                    return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
 
             #Set PT profile parameters as well
             if (diseq_grid_name == "VULCAN_test"):

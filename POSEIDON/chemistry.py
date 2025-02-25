@@ -353,11 +353,21 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
         met_num, fuv_num, nuv_num, P_num = len(log_kappa_list), len(log_gamma_list), len(T_equ_list), len(log_kzz_list), \
                                     len(C_O_list), len(log_met_list), len(log_fuv_list), len(log_nuv_list), len(pressures)
 
+        try:
+            conv_flags = np.array(database['Info/conv_flags'])
+            conv_flags = conv_flags.reshape((kappa_num, gamma_num, T_num, kzz_num, C_O_num, met_num, fuv_num, nuv_num))
+        except:
+            conv_flags = None
+
         # Check that all dimensions are strictly increasing
         for list in [log_kappa_list, log_gamma_list, T_equ_list, log_kzz_list, C_O_list, log_met_list, log_fuv_list, log_nuv_list]:
             for i in range(1, len(list)):
                 if list[i] < list[i-1]:
                     raise Exception("Error: values along each dimension of the grid must be provided in strictly increasing order")
+        # Check that pressure is strictly decreasing
+        for i in range(1, len(pressures)):
+            if pressures[i] < pressures[i-1]:
+                raise Exception("Error: pressures must be provided in strictly decreasing order")
 
         # Store number of chemical species
         N_species = len(chemical_species)
@@ -388,13 +398,14 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
         # Package atmosphere properties
         chemistry_grid = {'grid': grid, 'log_X_grid': log_X_grid, 'pressures': pressures, 'temp_profiles': temp_profiles, 'species': chemical_species,
                           'log_kappa_list': log_kappa_list, 'log_gamma_list': log_gamma_list, 'T_equ_list': T_equ_list, 'log_kzz_list': log_kzz_list, 
-                        'C_O_list': C_O_list, 'log_met_list': log_met_list, 'log_fuv_list': log_fuv_list, 'log_nuv_list': log_nuv_list
+                        'C_O_list': C_O_list, 'log_met_list': log_met_list, 'log_fuv_list': log_fuv_list, 'log_nuv_list': log_nuv_list, 'conv_flags':
+                        conv_flags
                         }
 
         return chemistry_grid
 
 
-def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log_P, chemical_species, return_dict = True):
+def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log_P, chemical_species, return_dict = True, use_conv_flag = True):
     '''
     Interpolate a pre-computed grid of VULCAN chemical mixing profiles onto a particular point in the parameter space. 
     Then interpolates the mixing profiles onto the provided pressures.
@@ -414,6 +425,9 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
             List of chemical species to interpolate mixing ratios for.
         return_dict (bool):
             If False, return an array of shape (len(species), len(P_array)).
+        use_conv_flag (bool):
+            If True, interpolates over a flag which indicates whether the runs in the VULCAN grid converged/
+            did not converge.
 
     Returns:
         log_X_interp_dict (dict) ---> if return_dict = True:
@@ -423,6 +437,9 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
         log_X_interp_array (np.array of float) ---> if return_dict=False:
             An array containing the log mixing ratios for the species specified
             in chemical_species.
+
+        conv_flag (bool):
+            Interpolated VULCAN convergence flag. If use_conv_flag is False, returns None instead.
     
     '''
 
@@ -438,6 +455,7 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
     log_met_list = chemistry_grid['log_met_list']
     log_fuv_list = chemistry_grid['log_fuv_list']
     log_nuv_list = chemistry_grid['log_nuv_list']
+    conv_flags = chemistry_grid['conv_flags']
 
     # Store names of the properties, the lists of their values in the grid, the values input by the user, the lengths of the inputs
     property_names = np.array(["log_kappa_IR", "log_gamma", "T_equ", "log_kzz", "C_O", "log_met", "delta_log_fuv", "delta_log_nuv"])
@@ -531,25 +549,50 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
 
         # 1D interpolation of the interpolated mixing ratio profiles onto a list of pressures
         return np.interp(np.expand_dims(log_P, 0), np.flip(log_pressures_list), np.flip(interpolated_profiles[:,0]))[0]
-
     
+    
+    # Interpolate the convergence flag
+    def interpolate_conv():
+        # Decide which properties to include in the interpolation (only those with more than one value in the grid)
+        interpolate_over = np.array(grid_lists, dtype=np.ndarray)[more_than_one_val]
+
+        #Create interpolator object
+        grid_interp = RegularGridInterpolator(interpolate_over, np.squeeze(conv_flags))
+
+        #This interpolates the grid at each point defined by the input parameters
+        expanded_dims_eval_points = np.empty(shape=(np.size(param_values),), dtype=np.ndarray)
+        for i, elem in enumerate(param_values): 
+            if np.size(elem) == 1: 
+                # If only one value provided, np.full turns it into an array
+                expanded_dims_eval_points[i] = np.expand_dims(np.full(max_len, elem), 0)
+            else: 
+                expanded_dims_eval_points[i] = np.expand_dims(elem, 0)
+        interpolated_conv_flag = grid_interp(np.vstack(expanded_dims_eval_points).T).T
+
+        return interpolated_conv_flag
+
+    if use_conv_flag:
+        conv_flag = interpolate_conv()
+    else:
+        conv_flag = None
+
     # Returning an array (default) 
     if not return_dict:
         if isinstance(chemical_species, str):
-            return interpolate(chemical_species)
+            return interpolate(chemical_species), conv_flag
         log_X_list = []
         for _, species in enumerate(chemical_species):
             log_X_list.append(interpolate(species))
         log_X_interp_array = np.array(log_X_list)
-        return log_X_interp_array
+        return log_X_interp_array, conv_flag
     
     # Returning a dictionary
     else:
         log_X_interp_dict = {}
         if isinstance(chemical_species, str):
             log_X_interp_dict[chemical_species] = interpolate(chemical_species)
-            return log_X_interp_dict
+            return log_X_interp_dict, conv_flag
         for _, species in enumerate(chemical_species):
             log_X_interp_dict[species] = interpolate(species)
 
-        return log_X_interp_dict
+        return log_X_interp_dict, conv_flag
