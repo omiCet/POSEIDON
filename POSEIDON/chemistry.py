@@ -375,6 +375,12 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
                 # Package grid for species q into combined array
                 log_X_grid[q,...] = array
 
+        #replace all negative infinities (i.e. 0 mixing ratio) with 1E-100
+        def remove_infinities(log_X_grid):
+            log_X_grid[log_X_grid == -np.inf] = -100
+            return log_X_grid
+        log_X_grid = remove_infinities(log_X_grid)
+
         # Close HDF5 file
         database.close()
             
