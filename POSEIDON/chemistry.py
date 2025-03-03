@@ -486,7 +486,7 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
 
     for i in range(len(param_values)):
         if not_valid(param_values[i], grid_varied_lists[i]):
-            raise Exception(f"Requested {property_names[i]} is out of the grid bounds ({np.min(grid_varied_lists[i])}, {np.max(grid_varied_lists[i])}).")
+            raise Exception(f"Requested {param_names[i]} is out of the grid bounds ({np.min(grid_varied_lists[i])}, {np.max(grid_varied_lists[i])}).")
     if not_valid(log_P, np.flip(log_pressures_list)): #Must flip log pressures during check since ordered from greatest to least
         raise Exception(f"Requested log pressures(s) are out of the grid bounds ({np.min(log_pressures_list)}, {np.max(log_pressures_list)}).")
 
