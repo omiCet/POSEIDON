@@ -866,7 +866,8 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                     P_surf = None, P_param_set = 1.0e-2, He_fraction = 0.17, 
                     N_slice_EM = 2, N_slice_DN = 4, constant_gravity = False,
                     chemistry_grid = None, fill_H_He = False,
-                    r_input = [], r_up_input = [], r_low_input = [], dr_input = []):
+                    r_input = [], r_up_input = [], r_low_input = [], dr_input = [],
+                    use_conv_flag = True):
     '''
     Generate an atmosphere from a user-specified model and parameter set. In
     full generality, this function generates 3D pressure-temperature and mixing 
@@ -929,6 +930,10 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
             Lower layer boundaries (m). Only read if r_profile is 'file_read'
         dr (3D np.array of float):
             Layer thicknesses (m). Only read if r_profile is 'file_read'
+        use_conv_flag (bool):
+            Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
+            rejects models if they are adjacent to or between points in the grid that did not 
+            converge.
     Returns:
         atmosphere (dict):
             Collection of atmospheric properties required to compute the
@@ -1059,7 +1064,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
                            constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
                            fill_H_He, r_input, r_up_input, r_low_input, dr_input,
-                           X_param_names)
+                           X_param_names, use_conv_flag = use_conv_flag)
 
     #***** Store cloud / haze / aerosol properties *****#
 
