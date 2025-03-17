@@ -302,7 +302,8 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
 
     # Add ability to add other grids to the allowed_list at some point
     if not grid in vulcan_grid_list:
-        raise Exception("Error: This VULCAN grid is currently not supported.")
+        raise Exception("\"" + str(grid) + "\" is not a supported grid. " + 
+                        "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
     
     else:
         if (rank == 0):
@@ -332,7 +333,18 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
                                 "in VULCAN or POSEIDON.\n")
                 
         # Open chemistry grid HDF5 file
-        database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')
+        try: 
+            database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')
+        except Exception:
+            print("The grid you requested could not be found. Please verify that it is located in inputs")
+
+        # Check the basic structure of the HDF5
+        if "Misc_info" not in database.keys():
+            raise Exception("\"Misc_info\" could not be found in the grid HDF5 file")
+        elif "Dimensions" not in database.keys():
+            raise Exception("\"Dimensions\" could not be found in the grid HDF5 file")
+        elif "property_names" not in database['Misc_info'].keys():
+            raise Exception("\"property_names\" could not be found in Misc_info in the grid HDF5 file")
 
         # Determine the axes of the grid and load in the corresponding dimensions
         property_names = np.array(re.findall(r"[_\w]+", database['Misc_info/property_names'].asstr()[0]))
@@ -369,7 +381,11 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
             for q, species in enumerate(chemical_species):
 
                 # Load grid for species q, then reshape into a 4D numpy array
-                array = np.array(database[species+'/log(X)']) #database[species+'/log(X)'] is a 2D array; axis 0 = runs, axis 1 = pressure
+                try:
+                    array = np.array(database[species+'/log(X)']) #database[species+'/log(X)'] is a 2D array; axis 0 = runs, axis 1 = pressure
+                except Exception as e:
+                    print(f"\"{species}/log(X)\" could not be found in the grid HDF5 file")
+                    raise e
                 array = array.reshape(*dim_sizes, P_num)
 
                 # Package grid for species q into combined array

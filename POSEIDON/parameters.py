@@ -545,7 +545,8 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                 X_params = ['log_kappa_IR', 'T_equ', "C_O", "log_met"]
             # Add in parameters for additional grids here
             else: 
-                raise Exception("Error: unsupported VULCAN grid.")
+                raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
+                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
 
         else: raise Exception("Error: unsupported mixing ratio profile.")
                 
