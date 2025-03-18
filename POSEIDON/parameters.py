@@ -313,7 +313,18 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                     PT_params += ['T_bar_term_high', 'T_bar_term_mid', 'Delta_T_term_high', 
                                 'Delta_T_term_mid', 'Delta_T_DN_high', 'Delta_T_DN_mid', 
                                 'log_P_mid', 'T_deep']
-            
+        
+        elif X_profile == 'chem_diseq':
+            #PT params only for the disequilibrium grids
+            if diseq_grid_name == "VULCAN_test":
+                PT_params = ['log_kappa_IR', 'T_equ']
+            if diseq_grid_name == "VULCAN_Grid1.1":
+                PT_params = ['log_kappa_IR', 'T_equ']
+            # Add in parameters for additional grids here
+            else: 
+                raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
+                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
+        
         N_PT_params = len(PT_params)   # Store number of P-T profile parameters
         params += PT_params            # Add P-T parameter names to combined list
         
@@ -538,11 +549,11 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             X_params = ['C_to_O','log_Met']
 
         elif X_profile == 'chem_diseq':
+            #X params only for the disequilibrium grids
             if diseq_grid_name == "VULCAN_test":
-                X_params = ['log_kappa_IR', 'T_equ']
-                PT_params = []
+                X_params = []
             if diseq_grid_name == "VULCAN_Grid1.1":
-                X_params = ['log_kappa_IR', 'T_equ', "C_O", "log_met"]
+                X_params = ['C_O', 'log_met']
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
@@ -877,7 +888,8 @@ def split_params(params_drawn, N_params_cumulative):
     
 def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
                    X_profile, TwoD_type, TwoD_param_scheme, species_EM_gradient,
-                   species_DN_gradient, species_vert_gradient, alpha, beta):
+                   species_DN_gradient, species_vert_gradient, alpha, beta, 
+                   diseq_grid_name=''):
     '''
     Convert the P-T profile and mixing ratio parameters into the state array
     format expected by the POSEIDON.atmosphere module. This function is called
@@ -920,6 +932,9 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
             List of chemical species with a day-night mixing ratio gradient.
         species_vert_gradient (list of str):
             List of chemical species with a vertical mixing ratio gradient.
+        diseq_grid_name (str):
+            For models using a pre-computed disequilibrium chemistry grid only. Name of 
+            specific pre-computed disequilibrium grid.
 
     Returns:
         PT_state (np.array of float):
@@ -966,6 +981,11 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
         len_X = 0
     elif (X_profile == 'chem_diseq'): #Chemical disequilibrium with VULCAN
         len_X = 0
+        #For disequilibrium chemistry, PT profiles are set by the grid.
+        if diseq_grid_name == "VULCAN_test":
+            len_PT = 2
+        elif diseq_grid_name == "VULCAN_Grid1.1":
+            len_PT = 2
     
     # Store number of parametrised chemical species in model
     N_param_species = len(param_species)
@@ -1512,6 +1532,8 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
     # If it is chem_eq or chem_diseq, then we need the 
     else:
         log_X_state = log_X_in
+        if X_profile == 'chem_diseq':
+            PT_state = PT_in
                 
     return PT_state, log_X_state
 

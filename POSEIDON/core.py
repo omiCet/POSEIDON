@@ -946,6 +946,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     TwoD_type = model['TwoD_type']
     param_names = model['param_names']
     X_param_names = model['X_param_names']
+    PT_param_names = model['PT_param_names']
     N_params_cum = model['N_params_cum']
     param_species = model['param_species']
     X_profile = model['X_profile']
@@ -1048,7 +1049,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                                  PT_dim, X_dim, PT_profile, X_profile, TwoD_type, 
                                  TwoD_param_scheme, species_EM_gradient, 
                                  species_DN_gradient, species_vert_gradient,
-                                 alpha, beta)
+                                 alpha, beta, diseq_grid_name)
 
     #***** Compute P-T, radial, mixing ratio, and other atmospheric profiles *****#
 
@@ -1064,7 +1065,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
                            constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
                            fill_H_He, r_input, r_up_input, r_low_input, dr_input,
-                           X_param_names, use_conv_flag = use_conv_flag)
+                           X_param_names, PT_param_names, use_conv_flag = use_conv_flag)
 
     #***** Store cloud / haze / aerosol properties *****#
 
@@ -1221,7 +1222,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     if (check_atmosphere_physical(atmosphere, opac) == False):
         spectrum = np.empty(len(wl))
         spectrum[:] = np.NaN
-        print(f"Atmosphere for model {model['model_name']} is unphysical!")
+        #print(f"Atmosphere for model {model['model_name']} is unphysical!")
         return spectrum   # Unphysical => reject model
 
     # Unpack model properties
