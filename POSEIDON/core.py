@@ -547,9 +547,9 @@ def define_model(model_name, bulk_species, param_species,
 
         # Check all user-specified species are compatible with the vulcan grid
         else:
-            if (np.any(~np.isin(param_species, supported_vulcan_and_poseidon_species)) == True):
-                raise Exception("A chemical species you selected is not supported " +
-                                "for VULCAN models.\n")
+            #if (np.any(~np.isin(param_species, supported_vulcan_and_poseidon_species)) == True):
+            #    raise Exception("A chemical species you selected is not supported " +
+            #                    "for VULCAN models.\n")
             if not ('H' in param_species):
                 raise Exception("In VULCAN models, you must include H as a param_species.")
 
@@ -1065,7 +1065,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
                            constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
                            fill_H_He, r_input, r_up_input, r_low_input, dr_input,
-                           X_param_names, PT_param_names, use_conv_flag = use_conv_flag)
+                           X_param_names, PT_param_names, use_conv_flag)
 
     #***** Store cloud / haze / aerosol properties *****#
 

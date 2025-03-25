@@ -2123,12 +2123,28 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             if (chemistry_grid == None): 
                 raise Exception("Error: no chemistry grid loaded for a disequilibrium model")
 
-            log_X_input, conv_flag = interpolate_vulcan_log_X_grid(chemistry_grid, list(PT_param_names) + list(X_param_names), 
-                                                                   list(PT_state) + list(log_X_state), np.log10(P), 
-                                                                   param_species, False, use_conv_flag)
+            grid_param_names = list(PT_param_names) + list(X_param_names[:2]) #TODO: make this dependent on grid
+            grid_state = list(PT_state) + list(log_X_state[:2])
+
+            # separate species into grid species and free species
+            N_species_free = len(X_param_names) - 2 # remove hardcoded 2
+            species_free = param_species[-N_species_free:]
+            grid_species = param_species[:-N_species_free]
             
+            # isochemical profile for free species
+            X_param_free = np.zeros(shape=(N_species_free, len(P), 1, 1))
+            for q in range(N_species_free):
+                X_param_free[q,...] = np.full(shape=(len(P), 1, 1), fill_value=log_X_state[q+2]) #TODO: again remove hardcoded 2
+            
+            # interpolate profiles from grid for grid species
+            log_X_input, conv_flag = interpolate_vulcan_log_X_grid(chemistry_grid, grid_param_names, 
+                                                                   grid_state, np.log10(P), 
+                                                                   grid_species, False, use_conv_flag)
             X_input = 10**log_X_input
-            X_param = X_input.reshape((len(param_species), len(P), 1, 1))
+            X_param_grid = X_input.reshape((len(grid_species), len(P), 1, 1))
+
+            # combine free and grid species back into one
+            X_param = np.concatenate((X_param_grid, X_param_free), axis=0)
 
             if use_conv_flag:
                 #check convergence flag and reject model if not converged

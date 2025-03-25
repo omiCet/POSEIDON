@@ -326,11 +326,8 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
         if ('all' in chemical_species):
             chemical_species = intersection_supported_species
 
-        # Check all user-specified species are compatible with the VULCAN grid
-        else:
-            if (np.any(~np.isin(chemical_species, intersection_supported_species)) == True):
-                raise Exception("A chemical species you selected is not supported " +
-                                "in VULCAN or POSEIDON.\n")
+        # Only look for the species that are included in the VULCAN grids
+        chemical_species = np.intersect1d(chemical_species, intersection_supported_species)
                 
         # Open chemistry grid HDF5 file
         try: 
@@ -462,18 +459,20 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
 
     np.seterr(divide = 'ignore')
 
+    # Removed this since it is redundant
+    # 
     # Check that the chemical species we want to interpolate are supported
-    if (grid in vulcan_grid_list):
-        supported_species = vulcan_supported_species
-    else:
-        raise Exception("Error: unsupported VULCAN grid")
-    if isinstance(chemical_species, str):
-        if chemical_species not in supported_species: 
-            raise Exception(chemical_species + " is not supported by VULCAN grids.")
-    else:
-        for species in chemical_species:
-            if species not in supported_species: 
-                raise Exception(species + " is not supported by VULCAN grids.")
+    # if (grid in vulcan_grid_list):
+    #     supported_species = vulcan_supported_species
+    # else:
+    #    raise Exception("Error: unsupported VULCAN grid")
+    # if isinstance(chemical_species, str):
+    #    if chemical_species not in supported_species: 
+    #        raise Exception(chemical_species + " is not supported by VULCAN grids.")
+    # else:
+    #    for species in chemical_species:
+    #        if species not in supported_species: 
+    #            raise Exception(species + " is not supported by VULCAN grids.")
 
     # Check that the log pressures of the grid are strictly decreasing
     if not np.all(log_pressures_list[:-1] >= log_pressures_list[1:]):
