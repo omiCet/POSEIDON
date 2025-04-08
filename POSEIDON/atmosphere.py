@@ -2128,8 +2128,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
 
             # separate species into grid species and free species
             N_species_free = len(X_param_names) - 2 # remove hardcoded 2
-            species_free = param_species[-N_species_free:]
-            grid_species = param_species[:-N_species_free]
+            grid_species = param_species[:-N_species_free] if N_species_free > 0 else param_species
             
             # isochemical profile for free species
             X_param_free = np.zeros(shape=(N_species_free, len(P), 1, 1))
