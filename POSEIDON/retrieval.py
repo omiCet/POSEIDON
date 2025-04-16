@@ -43,8 +43,7 @@ def run_retrieval(planet, star, model, opac, data, priors, wl, P,
                   stellar_T_step = 20, stellar_log_g_step = 0.1, 
                   N_live = 400, ev_tol = 0.5, sampling_algorithm = 'MultiNest', 
                   resume = False, verbose = True, sampling_target = 'parameter',
-                  chem_grid = 'fastchem', N_output_samples = 1000,
-                  use_conv_flag=True):
+                  chem_grid = 'fastchem', N_output_samples = 1000):
     '''
     ADD DOCSTRING
     '''
@@ -65,6 +64,7 @@ def run_retrieval(planet, star, model, opac, data, priors, wl, P,
     reference_parameter = model['reference_parameter']
     disable_atmosphere = model['disable_atmosphere']
     X_profile = model['X_profile']
+    use_conv_flag = model['use_conv_flag']
 
     # Unpack stellar properties
     if (star is not None):

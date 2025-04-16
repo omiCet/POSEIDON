@@ -386,7 +386,8 @@ def define_model(model_name, bulk_species, param_species,
                  log_P_slope_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
                  number_P_knots = 0, PT_penalty = False,
                  Na_K_fixed_ratio = False,
-                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = ''):
+                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = '',
+                 use_conv_flag = True):
     '''
     Create the model dictionary defining the configuration of the user-specified 
     forward model or retrieval.
@@ -510,6 +511,10 @@ def define_model(model_name, bulk_species, param_species,
         diseq_grid_name (str):
             For models using a pre-computed disequilibrium chemistry grid only. Name of 
             specific pre-computed disequilibrium grid.
+        use_conv_flag (bool):
+            Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
+            rejects models if they are adjacent to or between points in the grid that did not 
+            converge.
     Returns:
         model (dict):
             Dictionary containing the description of the desired POSEIDON model.
@@ -683,7 +688,8 @@ def define_model(model_name, bulk_species, param_species,
              'reflection_up_to_5um' : reflection_up_to_5um,
              'PT_penalty' : PT_penalty,
              'r_profile': r_profile,
-             'diseq_grid_name': diseq_grid_name
+             'diseq_grid_name': diseq_grid_name,
+             'use_conv_flag': use_conv_flag
              }
 
     return model
@@ -930,10 +936,6 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
             Lower layer boundaries (m). Only read if r_profile is 'file_read'
         dr (3D np.array of float):
             Layer thicknesses (m). Only read if r_profile is 'file_read'
-        use_conv_flag (bool):
-            Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
-            rejects models if they are adjacent to or between points in the grid that did not 
-            converge.
     Returns:
         atmosphere (dict):
             Collection of atmospheric properties required to compute the
@@ -969,6 +971,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     PT_penalty = model['PT_penalty']
     r_profile = model['r_profile']
     diseq_grid_name = model['diseq_grid_name']
+    use_conv_flag = model['use_conv_flag']
 
     # Unpack planet properties
     R_p = planet['planet_radius']
