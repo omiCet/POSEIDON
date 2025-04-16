@@ -327,8 +327,8 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
             chemical_species = intersection_supported_species
 
         # Only look for the species that are included in the VULCAN grids
-        chemical_species = np.intersect1d(chemical_species, intersection_supported_species)
-                
+        chemical_species = np.array([species for species in chemical_species if species in intersection_supported_species])
+        
         # Open chemistry grid HDF5 file
         try: 
             database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')

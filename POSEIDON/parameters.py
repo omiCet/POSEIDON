@@ -6,6 +6,7 @@ Functions related to the free parameters defining a POSEIDON model.
 import numpy as np
 import warnings
 from .chemistry import vulcan_grid_list
+from .supported_chemicals import supported_species, inactive_species, vulcan_supported_species
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -318,7 +319,7 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             #PT params only for the disequilibrium grids
             if diseq_grid_name == "VULCAN_test":
                 PT_params = ['log_kappa_IR', 'T_equ']
-            if diseq_grid_name == "VULCAN_Grid1.1":
+            elif diseq_grid_name == "VULCAN_Grid1.1":
                 PT_params = ['log_kappa_IR', 'T_equ']
             # Add in parameters for additional grids here
             else: 
@@ -552,12 +553,22 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             #X params only for the disequilibrium grids
             if diseq_grid_name == "VULCAN_test":
                 X_params = []
-            if diseq_grid_name == "VULCAN_Grid1.1":
+            elif diseq_grid_name == "VULCAN_Grid1.1":
                 X_params = ['C_O', 'log_met']
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
                                 "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
+            
+
+            # Check which species were input by the user but not contained in the VULCAN grids
+            supported_vulcan_and_poseidon_species = np.intersect1d(np.append(supported_species, inactive_species), 
+                                                                   vulcan_supported_species)
+            for species in param_species:
+                if species not in supported_vulcan_and_poseidon_species:
+                    X_params.append("log_" + species)
+                    print((f"{species} is not included in the disequilibrium chemistry grids. "
+                          "Its (isochemical) abundance will be treated as a free parameter."))
 
         else: raise Exception("Error: unsupported mixing ratio profile.")
                 

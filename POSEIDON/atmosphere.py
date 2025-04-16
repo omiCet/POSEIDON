@@ -2133,8 +2133,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             # isochemical profile for free species
             X_param_free = np.zeros(shape=(N_species_free, len(P), 1, 1))
             for q in range(N_species_free):
-                X_param_free[q,...] = np.full(shape=(len(P), 1, 1), fill_value=log_X_state[q+2]) #TODO: again remove hardcoded 2
-            
+                X_param_free[q,...] = np.full(shape=(len(P), 1, 1), fill_value=10**log_X_state[q+2]) #TODO: again remove hardcoded 2
             # interpolate profiles from grid for grid species
             log_X_input, conv_flag = interpolate_vulcan_log_X_grid(chemistry_grid, grid_param_names, 
                                                                    grid_state, np.log10(P), 
