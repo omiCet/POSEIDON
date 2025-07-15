@@ -12,7 +12,7 @@ Current supported grids:
 =Fixed parameters=
    log_gamma                  -1.0
    T_int (K)                  358
-   log_Kzz (cm/s**2)          10.5
+   log_kzz (cm/s**2)          10.5
 
 ===VULCAN_Grid2.0===
 =Variable parameters=
@@ -21,6 +21,6 @@ Current supported grids:
     T_equ (K)               [650, 1050], step=100
     C/O                     (0.2, 0.5, 1)
     log_met                 [0, 2] step=1
-    log_Kzz (cm/s**2)       [7.5, 11.5], step=1
+    log_kzz (cm/s**2)       [7.5, 11.5], step=1
 =Fixed parameters=
     T_int (K)               358

@@ -498,7 +498,7 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
             param_values = reordered_param_values
 
     else:
-        raise Exception(f"Error: the input parameters do not match the free parameters of the loaded-in grid ({grid_varied_property_names})")
+        raise Exception(f"Error: the input parameters ({param_names}) do not match the free parameters of the loaded-in grid ({grid_varied_property_names})")
     
 
     # Check that the desired values along each free parameter axis fall within the grid

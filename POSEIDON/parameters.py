@@ -561,7 +561,7 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             elif diseq_grid_name == "VULCAN_Grid1.1":
                 X_params = ['C_O', 'log_met']
             elif diseq_grid_name == "VULCAN_Grid2.0":
-                X_params = ['C_O', 'log_met', 'log_Kzz']
+                X_params = ['C_O', 'log_met', 'log_kzz']
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
