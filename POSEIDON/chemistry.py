@@ -13,7 +13,7 @@ import re
 from .utility import shared_memory_array
 from .supported_chemicals import supported_species, fastchem_supported_species, vulcan_supported_species, inactive_species
 
-vulcan_grid_list = ["VULCAN_test", "VULCAN_Grid1.1"] #allowed list of vulcan grids; files in inputs with name GRID_database.hdf5. to be editable by user
+vulcan_grid_list = ["VULCAN_test", "VULCAN_Grid1.1", "VULCAN_Grid2.0"] #allowed list of vulcan grids; files in inputs with name GRID_database.hdf5. to be editable by user
 
 
 def load_chemistry_grid(chemical_species, grid = 'fastchem', 

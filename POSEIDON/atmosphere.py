@@ -2123,17 +2123,24 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             if (chemistry_grid == None): 
                 raise Exception("Error: no chemistry grid loaded for a disequilibrium model")
 
-            grid_param_names = list(PT_param_names) + list(X_param_names[:2]) #TODO: make this dependent on grid
-            grid_state = list(PT_state) + list(log_X_state[:2])
+            #number of X_params 
+            N_grid_X_params = 0
+            if diseq_grid_name == "VULCAN_Grid1.1":
+                N_grid_X_params = 2 #C/O and metallicity
+            elif diseq_grid_name == "VULCAN_Grid2.0":
+                N_grid_X_params = 3 #C/O, metallicity, and Kzz
+
+            grid_param_names = list(PT_param_names) + list(X_param_names[:N_grid_X_params])
+            grid_state = list(PT_state) + list(log_X_state[:N_grid_X_params])
 
             # separate species into grid species and free species
-            N_species_free = len(X_param_names) - 2 # remove hardcoded 2
+            N_species_free = len(X_param_names) - N_grid_X_params
             grid_species = param_species[:-N_species_free] if N_species_free > 0 else param_species
             
             # isochemical profile for free species
             X_param_free = np.zeros(shape=(N_species_free, len(P), 1, 1))
             for q in range(N_species_free):
-                X_param_free[q,...] = np.full(shape=(len(P), 1, 1), fill_value=10**log_X_state[q+2]) #TODO: again remove hardcoded 2
+                X_param_free[q,...] = np.full(shape=(len(P), 1, 1), fill_value=10**log_X_state[q+N_grid_X_params])
             # interpolate profiles from grid for grid species
             log_X_input, conv_flag = interpolate_vulcan_log_X_grid(chemistry_grid, grid_param_names, 
                                                                    grid_state, np.log10(P), 
@@ -2173,6 +2180,14 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
 
                 T = T_rough
 
+            if (diseq_grid_name == "VULCAN_Grid2.0"):
+                T_int = 358
+
+                log_kappa_IR,log_gamma,T_equ = PT_state
+
+                T_rough = compute_T_Guillot(P,g_0,log_kappa_IR,log_gamma,T_int,T_equ)
+
+                T = T_rough
 
         # Gaussian smooth any profiles with a vertical profile
         for q, species in enumerate(param_species):

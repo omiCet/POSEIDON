@@ -321,6 +321,8 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                 PT_params = ['log_kappa_IR', 'T_equ']
             elif diseq_grid_name == "VULCAN_Grid1.1":
                 PT_params = ['log_kappa_IR', 'T_equ']
+            elif diseq_grid_name == "VULCAN_Grid2.0":
+                PT_params = ['log_kappa_IR', 'log_gamma', 'T_equ']
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
@@ -555,6 +557,8 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
                 X_params = []
             elif diseq_grid_name == "VULCAN_Grid1.1":
                 X_params = ['C_O', 'log_met']
+            elif diseq_grid_name == "VULCAN_Grid2.0":
+                X_params = ['C_O', 'log_met', 'log_Kzz']
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
@@ -1000,6 +1004,8 @@ def generate_state(PT_in, log_X_in, param_species, PT_dim, X_dim, PT_profile,
             len_PT = 2
         elif diseq_grid_name == "VULCAN_Grid1.1":
             len_PT = 2
+        elif diseq_grid_name == "VULCAN_Grid2.0":
+            len_PT = 3
     
     # Store number of parametrised chemical species in model
     N_param_species = len(param_species)
