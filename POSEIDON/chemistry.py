@@ -487,7 +487,7 @@ def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log
     grid_varied_property_names = property_names[more_than_one_val] #names of the axes corresponding to the variable parameters
     grid_varied_lists = grid_lists[more_than_one_val] #just the axes corresponding to the variable parameters
     if set(grid_varied_property_names) == set(param_names):
-        index_list = [np.nonzero(grid_varied_property_names == elem)[0][0] for elem in param_names]
+        index_list = np.array([np.nonzero(np.array(param_names) == elem)[0][0] for elem in grid_varied_property_names])
 
         # Check whether the order is the same; if not then reorder
         if not np.all(index_list[1:] >= index_list[:-1]):
