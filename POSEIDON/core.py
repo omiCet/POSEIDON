@@ -386,7 +386,7 @@ def define_model(model_name, bulk_species, param_species,
                  log_P_slope_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
                  number_P_knots = 0, PT_penalty = False,
                  Na_K_fixed_ratio = False,
-                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = '',
+                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = None,
                  use_conv_flag = True):
     '''
     Create the model dictionary defining the configuration of the user-specified 

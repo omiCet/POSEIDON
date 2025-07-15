@@ -324,6 +324,9 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             elif diseq_grid_name == "VULCAN_Grid2.0":
                 PT_params = ['log_kappa_IR', 'log_gamma', 'T_equ']
             # Add in parameters for additional grids here
+            elif diseq_grid_name is None:
+                raise Exception("diseq_grid_name must be provided to use disequilibrium chemistry. " +
+                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
                                 "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
