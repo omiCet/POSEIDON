@@ -1896,7 +1896,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
 def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
               wl_unit = 'micron', bin_width = 'half', spectrum_unit = '(Rp/Rs)^2', 
               skiprows = None, offset_1_datasets = None, offset_2_datasets = None,
-              offset_3_datasets = None):
+              offset_3_datasets = None, offset_4_datasets = None):
     '''
     Load the user provided datasets into the format expected by POSEIDON. 
     Also generate the functions required for POSEIDON to later calculate 
@@ -2034,6 +2034,8 @@ def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
         offset_2_data_end = 0
         offset_3_data_start = 0
         offset_3_data_end = 0
+        offset_4_data_start = 0
+        offset_4_data_end = 0
     
     # For including multiple datasets in one offset
     elif (offset_1_datasets is not None):
@@ -2093,6 +2095,29 @@ def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
         else:
             offset_3_data_start = 0
             offset_3_data_end = 0
+
+        # For including multiple datasets in a fourth offset
+        if (offset_4_datasets is not None):
+
+            if offset_3_datasets is None:
+                raise Exception('Need to have a dataset in offset_3_datasets when using 4 offsets')
+
+            offset_4_datasets = np.array(offset_4_datasets)
+
+            offset_4_data_start = []
+            offset_4_data_end = []
+            
+            for n in range(len(offset_4_datasets)):
+                if (offset_4_datasets[n] in datasets):
+                    offset_4_dataset_idx = np.where(datasets == offset_4_datasets[n])[0][0]
+                    offset_4_data_start.append(len_data_idx[offset_4_dataset_idx])  # Data index of first point with offset
+                    offset_4_data_end.append(len_data_idx[offset_4_dataset_idx+1])  # Data index of last point with offset + 1
+                else: 
+                    raise Exception("Dataset chosen for relative offset 4 is not included.")
+                
+        else:
+            offset_4_data_start = 0
+            offset_4_data_end = 0
                 
         offset_data_start = 0    # Dummy values when no offsets included
         offset_data_end = 0
@@ -2106,6 +2131,8 @@ def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
         offset_2_data_end = 0
         offset_3_data_start = 0
         offset_3_data_end = 0
+        offset_4_data_start = 0
+        offset_4_data_end = 0
     
     # Package data properties
     data = {'datasets': datasets, 'instruments': instruments, 'wl_data': wl_data,
@@ -2117,6 +2144,7 @@ def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
             'offset_1_start': offset_1_data_start, 'offset_1_end': offset_1_data_end,
             'offset_2_start': offset_2_data_start, 'offset_2_end': offset_2_data_end,
             'offset_3_start': offset_3_data_start, 'offset_3_end': offset_3_data_end,
+            'offset_4_start': offset_4_data_start, 'offset_4_end': offset_4_data_end
            }
 
     return data

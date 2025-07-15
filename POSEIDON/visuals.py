@@ -2676,12 +2676,12 @@ def plot_spectra_retrieved(spectra_median, spectra_low2, spectra_low1,
                     print('Applied ' + str(delta_rel) + ' ppm offset to offset_1_datasets')
         
         # Add multiple offsets
-        elif ((offset_datasets == 'two_datasets') or (offset_datasets == 'three_datasets')):
+        elif offset_datasets in ('two_datasets', 'three_datasets', 'four_datasets'):
             #print('in two datasets')     
 
             # Unpack offset data properties
-            offset_start_list = ['offset_1_start', 'offset_2_start', 'offset_3_start']
-            offset_end_list = ['offset_1_end', 'offset_2_end', 'offset_3_end']
+            offset_start_list = ['offset_1_start', 'offset_2_start', 'offset_3_start', 'offset_4_start']
+            offset_end_list = ['offset_1_end', 'offset_2_end', 'offset_3_end', 'offset_4_end']
 
             offset_start_end = []
 
@@ -2689,7 +2689,7 @@ def plot_spectra_retrieved(spectra_median, spectra_low2, spectra_low1,
                 offset_start, offset_end = data_properties[start_name], data_properties[end_name]
 
                 # Catch zero offsets, not defined as arrays
-                if isinstance(offset_start, np.int64):
+                if isinstance(offset_start, np.int64) or isinstance(offset_start, int):
                     offset_start, offset_end = np.array([offset_start]), np.array([offset_end])
                 
                 offset_start_end.append((offset_start[0], offset_end[-1]))
@@ -2710,6 +2710,8 @@ def plot_spectra_retrieved(spectra_median, spectra_low2, spectra_low1,
                         delta_rel_array[1] = line.split()[2]
                     if ('delta_rel_3' in line):
                         delta_rel_array[2] = line.split()[2]
+                    if ('delta_rel_4' in line):
+                        delta_rel_array[3] = line.split()[2]
 
                     # Stop reading file after 1 sigma constraints
                     if ('2 σ constraints' in line):
@@ -2724,8 +2726,11 @@ def plot_spectra_retrieved(spectra_median, spectra_low2, spectra_low1,
                 print('Applied ' + str(delta_rel_array[0]) + ' ppm offset to offset_1_datasets')
                 print('Applied ' + str(delta_rel_array[1]) + ' ppm offset to offset_2_datasets')
 
-                if (offset_datasets == 'three_datasets'):
+                if (offset_datasets == 'three_datasets' or offset_datasets == 'four_datasets'):
                     print('Applied ' + str(delta_rel_array[2]) + ' ppm offset to offset_3_datasets')
+
+                    if (offset_datasets == 'four_datasets'):
+                        print('Applied ' + str(delta_rel_array[3]) + ' ppm offset to offset_4_datasets')
         
         # Continue plotting if no offsets are found
         elif offset_datasets == None:

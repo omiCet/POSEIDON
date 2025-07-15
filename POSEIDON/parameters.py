@@ -802,6 +802,9 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
     elif (offsets_applied == 'three_datasets'):
         params += ['delta_rel_1', 'delta_rel_2', 'delta_rel_3']
         N_offset_params = 3
+    elif (offsets_applied == 'four_datasets'):
+        params += ['delta_rel_1', 'delta_rel_2', 'delta_rel_3', 'delta_rel_4']
+        N_offset_params = 4
     elif (offsets_applied == None):
         N_offset_params = 0
     else:

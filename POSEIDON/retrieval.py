@@ -946,6 +946,8 @@ def PyMultiNest_retrieval(planet, star, model, opac, data, prior_types,
         offset_2_end = data['offset_2_end']
         offset_3_start = data['offset_3_start']
         offset_3_end = data['offset_3_end']
+        offset_4_start = data['offset_4_start']
+        offset_4_end = data['offset_4_end']
 
         # Apply relative offset between datasets
         if (offsets_applied == 'single_dataset'):
@@ -995,6 +997,28 @@ def PyMultiNest_retrieval(planet, star, model, opac, data, prior_types,
                     ydata_adjusted[offset_2_start[m]:offset_2_end[m]] -= offset_params[1]*1e-6 
                 for s in range(len(offset_3_start)):
                     ydata_adjusted[offset_3_start[s]:offset_3_end[s]] -= offset_params[2]*1e-6 
+
+        elif (offsets_applied == 'four_datasets'):
+
+            ydata_adjusted = ydata.copy()
+
+            # Four offsets for four datasets
+            if offset_1_start == 0:
+                ydata_adjusted[offset_start[0]:offset_end[0]] -= offset_params[0]*1e-6
+                ydata_adjusted[offset_start[1]:offset_end[1]] -= offset_params[1]*1e-6
+                ydata_adjusted[offset_start[2]:offset_end[2]] -= offset_params[2]*1e-6
+                ydata_adjusted[offset_start[3]:offset_end[3]] -= offset_params[3]*1e-6
+
+            # Else, you have multiple datasets lumped together in both or either offset
+            else:
+                for n in range(len(offset_1_start)):
+                    ydata_adjusted[offset_1_start[n]:offset_1_end[n]] -= offset_params[0]*1e-6 
+                for m in range(len(offset_2_start)):
+                    ydata_adjusted[offset_2_start[m]:offset_2_end[m]] -= offset_params[1]*1e-6 
+                for s in range(len(offset_3_start)):
+                    ydata_adjusted[offset_3_start[s]:offset_3_end[s]] -= offset_params[2]*1e-6 
+                for p in range(len(offset_4_start)):
+                    ydata_adjusted[offset_4_start[p]:offset_4_end[p]] -= offset_params[3]*1e-6 
             
         else: 
             ydata_adjusted = ydata
