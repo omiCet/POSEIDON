@@ -2133,7 +2133,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             grid_param_names = list(PT_param_names) + list(X_param_names[:N_grid_X_params])
             grid_state = list(PT_state) + list(log_X_state[:N_grid_X_params])
 
-            # separate species into grid species and free species
+            # separate species into grid species and free species, assuming free species are listed at the end of param_species
             N_species_free = len(X_param_names) - N_grid_X_params
             grid_species = param_species[:-N_species_free] if N_species_free > 0 else param_species
             

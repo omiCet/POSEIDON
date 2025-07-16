@@ -571,11 +571,21 @@ def assign_free_params(param_species, object_type, PT_profile, X_profile,
             # Check which species were input by the user but not contained in the VULCAN grids
             supported_vulcan_and_poseidon_species = np.intersect1d(np.append(supported_species, inactive_species), 
                                                                    vulcan_supported_species)
+            free_species = []
+            wrong_order_flag = False
             for species in param_species:
                 if species not in supported_vulcan_and_poseidon_species:
                     X_params.append("log_" + species)
                     print((f"{species} is not included in the disequilibrium chemistry grids. "
                           "Its (isochemical) abundance will be treated as a free parameter."))
+                    free_species.append(species)
+                elif free_species: #check to see if there have been any free species defined
+                    wrong_order_flag = True
+            if wrong_order_flag:
+                raise Exception("Error: one or more free-chemistry species are not at the end of param_species. " +
+                                "Please reorder param_species such that the free-chemistry species " + str(free_species) + 
+                                " are at the end of param_species.")
+
 
         else: raise Exception("Error: unsupported mixing ratio profile.")
                 
