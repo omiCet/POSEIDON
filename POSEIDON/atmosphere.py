@@ -1740,7 +1740,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
              constant_gravity = False, chemistry_grid = None,
              PT_penalty = False, T_eq = None, r_profile = 'auto', fill_H_He = False,
              r_input = [], r_up_input = [], r_low_input = [], dr_input = [], X_param_names = [],
-             PT_param_names = [], use_conv_flag = True):
+             PT_param_names = [], use_conv_flag = True, silent_unphys_warns = False):
     '''
     Main function to calculate the vertical profiles in each atmospheric 
     column. The profiles cover the temperature, number density, mean molecular 
@@ -1839,6 +1839,8 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
             rejects models if they are adjacent to or between points in the grid that did not 
             converge.
+        silent_unphy_warns (bool):
+            Silences warnings that an atmosphere is unphysical (recommended to set to True for retrievals)
 
     
     Returns:
@@ -2154,8 +2156,9 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
             if use_conv_flag:
                 #check convergence flag and reject model if not converged
                 if (conv_flag < 1): 
-                    #print("Rejected due to failure of VULCAN to converge")
-                    #print("Parameters: " + str(log_X_state))
+                    if not silent_unphys_warns:
+                        print("Rejected due to failure of VULCAN to converge")
+                        print("Parameters: " + str(log_X_state))
                     return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
 
             #Set PT profile parameters for each grid
@@ -2212,8 +2215,8 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
     
     # Check if any mixing ratios are negative (i.e. trace species sum to > 1, so bulk < 0)
     if (np.any(X[0,:,:,:] < 0.0)): 
-        
-        print("Unphysical due to negative mixing ratio")
+        if not silent_unphys_warns:
+            print("Unphysical due to negative mixing ratio")
         # Quit computations if model rejected
         return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False
 
@@ -2255,7 +2258,8 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
 
      # Check if any of the values in r are negative
     if (np.any(r < 0.0)): 
-        print("Unphysical due to negative radius")
+        if not silent_unphys_warns:
+            print("Unphysical due to negative radius")
 
         # Quit computations if model rejected
         return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False

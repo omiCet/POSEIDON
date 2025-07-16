@@ -387,7 +387,7 @@ def define_model(model_name, bulk_species, param_species,
                  number_P_knots = 0, PT_penalty = False,
                  Na_K_fixed_ratio = False,
                  reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = None,
-                 use_conv_flag = True):
+                 use_conv_flag = True, silent_unphys_warns = False):
     '''
     Create the model dictionary defining the configuration of the user-specified 
     forward model or retrieval.
@@ -515,6 +515,8 @@ def define_model(model_name, bulk_species, param_species,
             Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
             rejects models if they are adjacent to or between points in the grid that did not 
             converge.
+        silent_unphy_warns (bool):
+            Silences warnings that an atmosphere is unphysical (recommended to set to True for retrievals)
     Returns:
         model (dict):
             Dictionary containing the description of the desired POSEIDON model.
@@ -689,7 +691,8 @@ def define_model(model_name, bulk_species, param_species,
              'PT_penalty' : PT_penalty,
              'r_profile': r_profile,
              'diseq_grid_name': diseq_grid_name,
-             'use_conv_flag': use_conv_flag
+             'use_conv_flag': use_conv_flag,
+             'silent_unphys_warns': silent_unphys_warns
              }
 
     return model
@@ -872,8 +875,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                     P_surf = None, P_param_set = 1.0e-2, He_fraction = 0.17, 
                     N_slice_EM = 2, N_slice_DN = 4, constant_gravity = False,
                     chemistry_grid = None, fill_H_He = False,
-                    r_input = [], r_up_input = [], r_low_input = [], dr_input = [],
-                    use_conv_flag = True):
+                    r_input = [], r_up_input = [], r_low_input = [], dr_input = []):
     '''
     Generate an atmosphere from a user-specified model and parameter set. In
     full generality, this function generates 3D pressure-temperature and mixing 
@@ -972,6 +974,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     r_profile = model['r_profile']
     diseq_grid_name = model['diseq_grid_name']
     use_conv_flag = model['use_conv_flag']
+    silent_unphys_warns = model['silent_unphys_warns']
 
     # Unpack planet properties
     R_p = planet['planet_radius']
@@ -1068,7 +1071,8 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
                            constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
                            fill_H_He, r_input, r_up_input, r_low_input, dr_input,
-                           X_param_names, PT_param_names, use_conv_flag)
+                           X_param_names, PT_param_names, use_conv_flag, 
+                           silent_unphys_warns)
 
     #***** Store cloud / haze / aerosol properties *****#
 
@@ -1112,7 +1116,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     return atmosphere
 
 
-def check_atmosphere_physical(atmosphere, opac):
+def check_atmosphere_physical(atmosphere, opac, silent_unphys_warns = False):
     '''
     Checks that a specific model atmosphere is physical.
 
@@ -1150,9 +1154,10 @@ def check_atmosphere_physical(atmosphere, opac):
     
             # Check if minimum or maximum temperatures are outside opacity range
             if ((T_max > T_fine_max) or (T_min < T_fine_min)): 
-                print("Atmosphere temps are outside range of valid opacity temperatures!")
-                print("Tmax = " + str(T_max) + ", Tmin = " + str(T_min))
-                print("Tfinemax = " + str(T_fine_max) + ", Tfinemin = " + str(T_fine_min))
+                if not silent_unphys_warns:
+                    print("Atmosphere temps are outside range of valid opacity temperatures!")
+                    print("Tmax = " + str(T_max) + ", Tmin = " + str(T_min))
+                    print("Tfinemax = " + str(T_fine_max) + ", Tfinemin = " + str(T_fine_min))
                 return False
 
             else:
@@ -1221,8 +1226,10 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     
     '''
 
+    silent_unphys_warns = model['silent_unphys_warns']
+
     # Check if the atmosphere is unphysical (e.g. temperature out of bounds)
-    if (check_atmosphere_physical(atmosphere, opac) == False):
+    if (check_atmosphere_physical(atmosphere, opac, silent_unphys_warns) == False):
         spectrum = np.empty(len(wl))
         spectrum[:] = np.NaN
         #print(f"Atmosphere for model {model['model_name']} is unphysical!")

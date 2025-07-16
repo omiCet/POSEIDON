@@ -64,7 +64,6 @@ def run_retrieval(planet, star, model, opac, data, priors, wl, P,
     reference_parameter = model['reference_parameter']
     disable_atmosphere = model['disable_atmosphere']
     X_profile = model['X_profile']
-    use_conv_flag = model['use_conv_flag']
 
     # Unpack stellar properties
     if (star is not None):
@@ -176,8 +175,7 @@ def run_retrieval(planet, star, model, opac, data, priors, wl, P,
                               evidence_tolerance = ev_tol, log_zero = -1e90,
                               importance_nested_sampling = False, 
                               sampling_efficiency = sampling_target, 
-                              const_efficiency_mode = False, 
-                              use_conv_flag=use_conv_flag)
+                              const_efficiency_mode = False)
 
         # Write retrieval results to file
         if (rank == 0):
@@ -238,7 +236,7 @@ def forward_model(param_vector, planet, star, model, opac, data, wl, P, P_ref_se
                   R_p_ref_set, P_param_set, He_fraction, N_slice_EM, N_slice_DN, 
                   spectrum_type, T_phot_grid, T_het_grid, log_g_phot_grid,
                   log_g_het_grid, I_phot_grid, I_het_grid, y_p, F_s_obs,
-                  constant_gravity, chemistry_grid, use_conv_flag=True):
+                  constant_gravity, chemistry_grid):
     '''
     ADD DOCSTRING
     '''
@@ -360,8 +358,7 @@ def forward_model(param_vector, planet, star, model, opac, data, wl, P, P_ref_se
                                      log_X_params, cloud_params, geometry_params, 
                                      log_g, M_p, T_input, X_input, P_surf, P_param_set,
                                      He_fraction, N_slice_EM, N_slice_DN, 
-                                     constant_gravity, chemistry_grid, 
-                                     use_conv_flag=use_conv_flag)
+                                     constant_gravity, chemistry_grid)
         
         # If PT_penalty is true, then you compute the PT penalty
         # Only for Pelletier 2021 profiles
@@ -569,7 +566,7 @@ def PyMultiNest_retrieval(planet, star, model, opac, data, prior_types,
                           N_slice_DN, N_params, T_phot_grid, T_het_grid, 
                           log_g_phot_grid, log_g_het_grid, I_phot_grid, 
                           I_het_grid, y_p, F_s_obs, constant_gravity,
-                          chemistry_grid, use_conv_flag=True, **kwargs):
+                          chemistry_grid, **kwargs):
     ''' 
     Main function for conducting atmospheric retrievals with PyMultiNest.
     
@@ -894,8 +891,7 @@ def PyMultiNest_retrieval(planet, star, model, opac, data, prior_types,
                                                         spectrum_type, T_phot_grid, T_het_grid, 
                                                         log_g_phot_grid, log_g_het_grid,
                                                         I_phot_grid, I_het_grid, y_p, F_s_obs,
-                                                        constant_gravity, chemistry_grid,
-                                                        use_conv_flag=use_conv_flag)
+                                                        constant_gravity, chemistry_grid)
         
         # Reject unphysical spectra (forced to be NaN by function above)
         if (np.any(np.isnan(spectrum))):
@@ -1089,7 +1085,7 @@ def retrieved_samples(planet, star, model, opac, data, retrieval_name, wl, P,
                                    spectrum_type, T_phot_grid, T_het_grid, 
                                    log_g_phot_grid, log_g_het_grid,
                                    I_phot_grid, I_het_grid, y_p, F_s_obs,
-                                   constant_gravity, chemistry_grid, use_conv_flag=False)
+                                   constant_gravity, chemistry_grid)
 
         # Based on first model, create arrays to store retrieved temperature, spectrum, and mixing ratios
         if (i == 0):
@@ -1167,8 +1163,7 @@ def get_retrieved_atmosphere(planet, model, P, P_ref_set = 10, R_p_ref_set = Non
                              P_param_set = 1.0e-2, He_fraction = 0.17,
                              N_slice_EM = 2, N_slice_DN = 4, 
                              constant_gravity = False, chemistry_grid = None,
-                             specific_param_values = [], use_conv_flag = True,
-                             verbose = False):
+                             specific_param_values = [], verbose = False):
     '''
     Creates the atmosphere dictionary for the median or best fit spectrum of a retrieval.
 
@@ -1201,10 +1196,6 @@ def get_retrieved_atmosphere(planet, model, P, P_ref_set = 10, R_p_ref_set = Non
         specific_param_values (list):
             If a specific parameter combination is provided, this will be used
             instead of the median or best fit parameters.
-        use_conv_flag (bool):
-            Applies to models using a pre-computed disequilibrium chemistry grid only. If True, 
-            rejects models if they are adjacent to or between points in the grid that did not 
-            converge.
 
     Returns:
         atmosphere (dict):
@@ -1342,8 +1333,7 @@ def get_retrieved_atmosphere(planet, model, P, P_ref_set = 10, R_p_ref_set = Non
                                  P_param_set = P_param_set, He_fraction = He_fraction, 
                                  N_slice_EM = N_slice_EM, N_slice_DN = N_slice_DN, 
                                  constant_gravity = constant_gravity,
-                                 chemistry_grid = chemistry_grid, 
-                                 use_conv_flag = use_conv_flag)
+                                 chemistry_grid = chemistry_grid)
     
     return atmosphere
 
