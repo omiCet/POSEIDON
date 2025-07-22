@@ -14,10 +14,9 @@ POSEIDON.egg-info/
 inputs/
 run/
 .vscode
-
 /planets
-/final_experiments
 /Aerosol-Database-Make
-final_experiments
-
+*data_processed.hdf5
+POSEIDON/hierarchical.py
+inputs.zip
 POSEIDON/reference_data/models/WASP-39b/VULCAN

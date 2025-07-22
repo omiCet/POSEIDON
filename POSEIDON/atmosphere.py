@@ -988,13 +988,24 @@ def add_bulk_component(P, X_param, N_species, N_sectors, N_zones, bulk_species,
         # Add H2 and He mixing ratios to first two elements in X state vector for this region
         X[0,:,:,:] = X_H2  
         X[1,:,:,:] = X_He
+
+    # For H+He bulk mixture
+    elif ('H' and 'He' in bulk_species):
+
+        # Compute H and He mixing ratios for a fixed H2/He fraction (defined in config.py)
+        X_H = 2.0*(1.0 - np.sum(X_param, axis=0))/(1.0 + He_fraction)   # H mixing ratio array
+        X_He = He_fraction*(X_H/2.0)                                     # He mixing ratio array
+                
+        # Add H and He mixing ratios to first two elements in X state vector for this region
+        X[0,:,:,:] = X_H  
+        X[1,:,:,:] = X_He
         
     # For any other choice of bulk species, the first mixing ratio is the bulk species
     else: 
 
         if (len(bulk_species) > 1):
             raise Exception("Only a single species can be designated as bulk " +
-                            "(besides models with H2 & He with a fixed He/H2 ratio).")
+                            "(besides models with H2 & He or H & He with a fixed He/H2 ratio).")
         
         # Calculate first mixing ratio in state vector
         X_0 = 1.0 - np.sum(X_param, axis=0)   
@@ -1738,7 +1749,7 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
              He_fraction, T_input, X_input, P_param_set, 
              log_P_slope_phot, log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name,
              constant_gravity = False, chemistry_grid = None,
-             PT_penalty = False, T_eq = None, r_profile = 'auto', fill_H_He = False,
+             PT_penalty = False, T_eq = None, mu_back = None, r_profile = 'auto', fill_H_He = False,
              r_input = [], r_up_input = [], r_low_input = [], dr_input = [], X_param_names = [],
              PT_param_names = [], use_conv_flag = True, silent_unphys_warns = False):
     '''
@@ -1842,6 +1853,8 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
         silent_unphy_warns (bool):
             Silences warnings that an atmosphere is unphysical (recommended to set to True for retrievals)
 
+        mu_back (float):
+            Mean molecular mass of background gas, if bulk_species = ['ghost'] (AMU).
     
     Returns:
         T (3D np.array of float):
@@ -2231,8 +2244,16 @@ def profiles(P, R_p, g_0, PT_profile, X_profile, PT_state, P_ref, R_p_ref,
     
     # Load masses of each species from dictionary in species_data.py
     for q in range(N_species):
+
         species = included_species[q]
-        masses_all[q] = masses[species]
+
+        # If background gas is the free mmw 'ghost' species
+        if (species == 'ghost'):
+            masses_all[q] = mu_back
+
+        # All other masses loaded from the dictionary in species_data.py
+        else:
+            masses_all[q] = masses[species]
     
     # Calculate mean molecular mass
     mu = compute_mean_mol_mass(P, X, N_species, N_sectors, N_zones, masses_all)

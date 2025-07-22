@@ -1,21 +1,22 @@
 ''' 
 POSEIDON CORE ROUTINE.
 
-Copyright 2023-2024, Ryan J. MacDonald.
+Copyright 2023-2025, Ryan J. MacDonald.
 
 '''
+
 
 import os
 
 # Force a single core to be used by numpy (mpirun handles parallelisation)
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['OPENBLAS_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
-os.environ['CBLAS_NUM_THREADS'] = '1'
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["CBLAS_NUM_THREADS"] = "1"
 
 # These settings only used for GPU models (experimental)
-os.environ['block'] = '128'
-os.environ['thread'] = '128'
+os.environ["block"] = "128"
+os.environ["thread"] = "128"
 
 import numpy as np
 from numba.core.decorators import jit
@@ -29,7 +30,9 @@ from .utility import create_directories, write_spectrum, read_data
 from .stellar import planck_lambda, load_stellar_pysynphot, load_stellar_pymsg, \
                      open_pymsg_grid
 from .supported_chemicals import supported_species, supported_cia, inactive_species, \
-                                 fastchem_supported_species, aerosol_supported_species, vulcan_supported_species
+                                 fastchem_supported_species, aerosol_supported_species, vulcan_supported_species, \
+                                 aerosols_lognormal_logwidth_free, aerosol_directional_supported_species, \
+                                 diamond_supported_species
 from .parameters import assign_free_params, generate_state, \
                         unpack_geometry_params, unpack_cloud_params
 from .absorption import opacity_tables, store_Rayleigh_eta_LBL, extinction,\
@@ -42,25 +45,26 @@ from .emission import emission_single_stream, determine_photosphere_radii, \
                       emission_single_stream_GPU, determine_photosphere_radii_GPU, \
                       emission_Toon, reflection_Toon
 
-from .clouds import Mie_cloud, Mie_cloud_free, load_aerosol_grid
+from .clouds import compute_relevant_Mie_properties
 
 from .utility import mock_missing
 
 try:
     import cupy as cp
 except ImportError:
-    cp = mock_missing('cupy')
+    cp = mock_missing("cupy")
 
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 
-block = int(os.environ['block'])
-thread = int(os.environ['thread'])
+block = int(os.environ["block"])
+thread = int(os.environ["thread"])
 
 import warnings
 
-warnings.filterwarnings("ignore") # Suppress numba performance warning
+warnings.filterwarnings("ignore")  # Suppress numba performance warning
+
 
 def find_nearest(array, value):
     array = np.asarray(array)
@@ -302,7 +306,8 @@ def create_star(R_s, T_eff, log_g, Met, T_eff_error = 100.0, log_g_error = 0.1,
 
 
 def create_planet(planet_name, R_p, mass = None, gravity = None, 
-                  log_g = None, T_eq = None, d = None, d_err = None, b_p = 0.0, a_p = None):
+                  log_g = None, T_eq = None, d = None, d_err = None, 
+                  b_p = 0.0, a_p = None):
     '''
     Initialise the planet dictionary object used by POSEIDON.
 
@@ -385,9 +390,13 @@ def define_model(model_name, bulk_species, param_species,
                  log_P_slope_phot = 0.5,
                  log_P_slope_arr = [-3.0, -2.0, -1.0, 0.0, 1.0, 1.5, 2.0],
                  number_P_knots = 0, PT_penalty = False,
-                 Na_K_fixed_ratio = False,
-                 reflection_up_to_5um = False, r_profile = 'auto', diseq_grid_name = None,
-                 use_conv_flag = True, silent_unphys_warns = False):
+                 Na_K_fixed_ratio = False, reflection_up_to_5um = False, 
+                 high_res_method = None, alpha_high_res_option = 'log', 
+                 fix_alpha_high_res = False, fix_W_conv_high_res = False, 
+                 fix_beta_high_res = True, fix_Delta_phi_high_res = True, 
+                 lognormal_logwidth_free = False, r_profile = 'auto', 
+                 diseq_grid_name = None, use_conv_flag = True, 
+                 silent_unphys_warns = False):
     '''
     Create the model dictionary defining the configuration of the user-specified 
     forward model or retrieval.
@@ -435,7 +444,7 @@ def define_model(model_name, bulk_species, param_species,
             (Options: single_dataset / two_datasets / three_datasets).
         error_inflation (str):
             Whether to consider inflation of error bars in a retrieval
-            (Options: Line15).
+            (Options: Line15 / Piette20 / Line15+Piette20).
         radius_unit (str)
             Planet radius unit used to report retrieval results
             (Options: R_J / R_E)
@@ -504,6 +513,29 @@ def define_model(model_name, bulk_species, param_species,
             If True, sets log_K = 0.1 * log_Na
         reflection_up_to_5um (bool):
             If True, only computes albedo up to 5 um (to speed up computations).
+        high_res_method (list of str):
+            For high resolution retrievals, define which processing method
+            will be used - only not None for high-res retrievals
+            (Options: None, 'pca', 'sysrem').
+        alpha_high_res_option (str):
+            For high resolution retrievals, specify whether the retrieved model
+            scaling parameter is in log space (default) or linear space
+            (Options: 'log', 'linear').
+        fix_alpha_high_res (bool):
+            If True, the alpha (model scaling) parameter in high resolution 
+            retrievals will be fixed to 1 and not a retrieved parameter.
+        fix_W_conv_high_res (bool):
+            If True, the W_conv (broadening) parameter in high resolution 
+            retrievals will be fixed to 0 and not a retrieved parameter.
+        fix_beta_high_res (bool):
+            If True, the beta (error scaling) parameter in high resolution 
+            retrievals will be fixed to 1 and not a retrieved parameter.
+        fix_Delta_phi_high_res (bool):
+            If True, the Delta_phi (phase shift) parameter in high resolution 
+            retrievals will be fixed to 0 and not a retrieved parameter.
+        lognormal_logwidth_free (bool):
+            If True, has log_r_m_std_dev be a free parameter for aerosols. 
+            Only applicable for certain aerosols with precomputed grids. 
         r_profile (str):
             Determines whether the radial profile is determined using hydrostatic equilibrium
             or defined by the user.
@@ -528,6 +560,10 @@ def define_model(model_name, bulk_species, param_species,
     # Create array containing all chemical species in model
     bulk_species = np.array(bulk_species)
     param_species = np.array(param_species)
+
+    # Check that the 'ghost' species option is only for thr bulk species
+    if ('ghost' in param_species):
+        raise Exception("The ghost molecule can only be the bulk species.\n")
 
     # For chemical equilibrium models, find the necessary chemical species
     if (X_profile == 'chem_eq'):
@@ -598,9 +634,25 @@ def define_model(model_name, bulk_species, param_species,
         raise Exception("A chemical species you selected is not supported.\n")
     
     # Check to make sure an aerosol is inputted if cloud_type = specific_aerosol
-    if (np.any(~np.isin(aerosol_species, aerosol_supported_species)) == True) and aerosol_species != ['free'] and aerosol_species != ['file_read']:
-        raise Exception('Please input supported aerosols (check supported_opac.py) or aerosol = [\'free\'] or [\'file_read\'].')
+    if ((np.any(~np.isin(aerosol_species, aerosol_supported_species)) == True)  and 
+        (np.any(~np.isin(aerosol_species, aerosol_directional_supported_species)) == True) and
+        (np.any(~np.isin(aerosol_species, diamond_supported_species)) == True)):
+        if aerosol_species != ['free'] and aerosol_species != ['file_read']:
+            raise Exception('Please input supported aerosols (check supported_chemicals.py) or aerosol = [\'free\'] or [\'file_read\'].')
+    
+    # See if its an aerosol with lognormal logwidth free 
+    if (lognormal_logwidth_free == True) and (np.any(~np.isin(aerosol_species, aerosols_lognormal_logwidth_free)) == True):
+        raise Exception('Please input supported aerosols for lognormal_logwidth free.')
 
+    # Make sure they aren't pulling aerosols from two databases
+    if ((np.any(np.isin(aerosol_species, aerosol_supported_species)) == True)  and 
+        (np.any(np.isin(aerosol_species, aerosol_directional_supported_species)) == True)):
+        raise Exception('Cannot have aerosols from normal database and directional databse mixed in same forward model.')
+    
+    # Check to make sure the high resolution alpha parameter option is log or linear
+    if (alpha_high_res_option not in ['log', 'linear']):
+        raise Exception('Error: alpha_high_res_option must be log or linear.')
+        
     # Create list of collisionally-induced absorption (CIA) pairs
     CIA_pairs = []
     for pair in supported_cia:
@@ -631,9 +683,9 @@ def define_model(model_name, bulk_species, param_species,
     param_names, physical_param_names, \
     PT_param_names, X_param_names, \
     cloud_param_names, geometry_param_names, \
-    stellar_param_names, \
-    N_params_cum = assign_free_params(param_species, object_type, PT_profile,
-                                      X_profile, cloud_model, cloud_type, 
+    stellar_param_names, high_res_param_names, \
+    N_params_cum = assign_free_params(param_species, bulk_species, object_type, 
+                                      PT_profile, X_profile, cloud_model, cloud_type, 
                                       gravity_setting, mass_setting, stellar_contam, 
                                       offsets_applied, error_inflation, PT_dim, 
                                       X_dim, cloud_dim, TwoD_type, TwoD_param_scheme, 
@@ -642,14 +694,11 @@ def define_model(model_name, bulk_species, param_species,
                                       opaque_Iceberg, surface, sharp_DN_transition,
                                       reference_parameter, disable_atmosphere, 
                                       aerosol_species, log_P_slope_arr,
-                                      number_P_knots, PT_penalty, diseq_grid_name)
-    
-    # If cloud_model = Mie, load in the cross section 
-    if cloud_model == 'Mie' and aerosol_species != ['free'] and aerosol_species != ['file_read']:
-        aerosol_grid = load_aerosol_grid(aerosol_species)
-    else:
-        aerosol_grid = None
-        
+                                      number_P_knots, PT_penalty, 
+                                      high_res_method, alpha_high_res_option,
+                                      fix_alpha_high_res, fix_W_conv_high_res, 
+                                      fix_beta_high_res, fix_Delta_phi_high_res,
+                                      lognormal_logwidth_free, diseq_grid_name)
 
     # Package model properties
     model = {'model_name': model_name, 'object_type': object_type,
@@ -681,7 +730,6 @@ def define_model(model_name, bulk_species, param_species,
              'reference_parameter': reference_parameter,
              'disable_atmosphere': disable_atmosphere,
              'aerosol_species': aerosol_species,
-             'aerosol_grid': aerosol_grid,
              'scattering' : scattering,
              'reflection' : reflection,
              'log_P_slope_phot': log_P_slope_phot,
@@ -689,12 +737,16 @@ def define_model(model_name, bulk_species, param_species,
              'Na_K_fixed_ratio': Na_K_fixed_ratio,
              'reflection_up_to_5um' : reflection_up_to_5um,
              'PT_penalty' : PT_penalty,
-             'r_profile': r_profile,
-             'diseq_grid_name': diseq_grid_name,
-             'use_conv_flag': use_conv_flag,
+             'high_res_method': high_res_method, 
+             'high_res_param_names': high_res_param_names,
+             'lognormal_logwidth_free': lognormal_logwidth_free,
+             'r_profile': r_profile, 
+             'diseq_grid_name': diseq_grid_name, 
+             'use_conv_flag': use_conv_flag, 
              'silent_unphys_warns': silent_unphys_warns
              }
 
+            
     return model
 
 
@@ -767,7 +819,7 @@ def wl_grid_line_by_line(wl_min, wl_max, line_by_line_res = 0.01):
     wl = 1.0e4/nu   # Convert from cm^-1 to um
     
     return wl
-    
+
 
 def read_opacities(model, wl, opacity_treatment = 'opacity_sampling', 
                    T_fine = None, log_P_fine = None, opacity_database = 'High-T',
@@ -804,7 +856,7 @@ def read_opacities(model, wl, opacity_treatment = 'opacity_sampling',
         testing (bool):
             For GitHub Actions automated tests. If True, disables reading the 
             full opacity database (since GitHub Actions can't handle downloading 
-            the full database - alas, 30+ GB is a little too large!).
+            the full database - alas, 70+ GB is a little too large!).
     
     Returns:
         opac (dict):
@@ -821,6 +873,9 @@ def read_opacities(model, wl, opacity_treatment = 'opacity_sampling',
     CIA_pairs = model['CIA_pairs']
     ff_pairs = model['ff_pairs']
     bf_species = model['bf_species']
+    aerosol_species = model['aerosol_species']
+    cloud_model = model['cloud_model']
+    lognormal_logwidth_free = model['lognormal_logwidth_free']
     
     # For opacity sampling, pre-compute opacities
     if (opacity_treatment == 'opacity_sampling'):
@@ -833,20 +888,31 @@ def read_opacities(model, wl, opacity_treatment = 'opacity_sampling',
         # Read and interpolate cross sections in pressure, temperature and wavelength
         sigma_stored, CIA_stored, \
         Rayleigh_stored, eta_stored, \
-        ff_stored, bf_stored = opacity_tables(rank, comm, wl, chemical_species, 
-                                              active_species, CIA_pairs, 
-                                              ff_pairs, bf_species, T_fine,
-                                              log_P_fine, opacity_database, 
-                                              wl_interp, testing, database_version)
+        ff_stored, bf_stored, \
+        sigma_Mie_stored, aerosol_wl_grid, \
+        aerosol_r_m_grid, aerosol_log_r_m_std_dev_grid  = opacity_tables(rank, comm, wl, chemical_species, 
+                                                                        active_species, CIA_pairs, 
+                                                                        ff_pairs, bf_species, 
+                                                                        aerosol_species, cloud_model,
+                                                                        T_fine, log_P_fine, opacity_database, 
+                                                                        wl_interp, testing, database_version,
+                                                                        lognormal_logwidth_free,)
                     
-    elif (opacity_treatment == 'line_by_line'):   
+    elif (opacity_treatment == 'line_by_line'):
         
         # For line-by-line case, we still compute Rayleigh scattering in advance
         Rayleigh_stored, eta_stored = store_Rayleigh_eta_LBL(wl, chemical_species)   
         
         # No need for pre-computed arrays for line-by-line, so keep empty arrays
-        sigma_stored, CIA_stored, \
-        ff_stored, bf_stored = (np.array([]) for _ in range(4))
+        sigma_stored = np.array([])
+        CIA_stored = np.array([])
+        ff_stored = np.array([])
+        CIA_stored = np.array([])
+        bf_stored = np.array([])
+        sigma_Mie_stored = np.array([])
+        aerosol_wl_grid = np.array([])
+        aerosol_r_m_grid = np.array([])
+        aerosol_log_r_m_std_dev_grid = np.array([])
 
     # Move cross sections to GPU memory to speed up later computations
     if (device == 'gpu'):
@@ -856,6 +922,34 @@ def read_opacities(model, wl, opacity_treatment = 'opacity_sampling',
         eta_stored = cp.asarray(eta_stored)
         ff_stored = cp.asarray(ff_stored)
         bf_stored = cp.asarray(bf_stored)
+        sigma_Mie_stored = cp.asarray(sigma_Mie_stored)
+        aerosol_wl_grid = cp.asarray(aerosol_wl_grid)
+        aerosol_r_m_grid = cp.asarray(aerosol_r_m_grid)
+        aerosol_log_r_m_std_dev_grid = cp.asarray(aerosol_log_r_m_std_dev_grid)
+
+    # Getting grid name for aerosol_stored dictionary 
+    if model['cloud_model'] == 'Mie' and aerosol_species != ['free'] and aerosol_species != ['file_read']:
+        # If its a directional aerosol
+        if (np.any(np.isin(aerosol_species, aerosol_directional_supported_species)) == True):
+            grid = 'aerosol_directional'
+        # If its a diamond aerosol, and not only nanodiamonds
+        elif (np.any(np.isin(aerosol_species, diamond_supported_species)) == True) and (aerosol_species != ['NanoDiamonds']):
+            grid = 'aerosol_diamonds'
+        # Else its in the normal grid
+        else:
+            # Normal grid load in (assumes log_r_m_std_dev = 0.5)
+            if lognormal_logwidth_free == False:
+                grid = 'aerosol'
+            # Grid with an extra dimension for log_r_m_std_dev
+            else:
+                grid = aerosol_species[0] + '_free_logwidth'
+    else:
+        grid = 'None'
+
+    aerosol_stored = {'grid': grid, 'sigma_Mie_grid': sigma_Mie_stored,
+                    'wl_grid': aerosol_wl_grid, 
+                    'r_m_grid' : aerosol_r_m_grid, 
+                    'log_r_m_std_dev_grid' : aerosol_log_r_m_std_dev_grid}
 
     # Package opacity data required by our model in memory
     opac = {'opacity_database': opacity_database, 
@@ -863,7 +957,7 @@ def read_opacities(model, wl, opacity_treatment = 'opacity_sampling',
             'CIA_stored': CIA_stored, 'Rayleigh_stored': Rayleigh_stored, 
             'eta_stored': eta_stored, 'ff_stored': ff_stored, 
             'bf_stored': bf_stored, 'T_fine': T_fine, 'log_P_fine': log_P_fine,
-            'database_version': database_version,
+            'database_version': database_version, 'aerosol_stored': aerosol_stored,
            }
 
     return opac
@@ -874,7 +968,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                     log_g = None, M_p = None, T_input = [], X_input = [], 
                     P_surf = None, P_param_set = 1.0e-2, He_fraction = 0.17, 
                     N_slice_EM = 2, N_slice_DN = 4, constant_gravity = False,
-                    chemistry_grid = None, fill_H_He = False,
+                    chemistry_grid = None, mu_back = None, fill_H_He = False,
                     r_input = [], r_up_input = [], r_low_input = [], dr_input = []):
     '''
     Generate an atmosphere from a user-specified model and parameter set. In
@@ -926,6 +1020,8 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
         chemistry_grid (dict):
             For models with a pre-computed chemistry grid only, this dictionary
             is produced in chemistry.py.
+        mu_back (float):
+            Mean molecular mass of background gas, if bulk_species = ['ghost'] (AMU).
         fill_H_He (bool):
             Applies when mixing ratio profiles are input by the user. 
             If True, ignores user-provided H (and He if designated as a bulk species)
@@ -971,6 +1067,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     aerosol_species = model['aerosol_species']
     Na_K_fixed_ratio = model['Na_K_fixed_ratio']
     PT_penalty = model['PT_penalty']
+    lognormal_logwidth_free = model['lognormal_logwidth_free']
     r_profile = model['r_profile']
     diseq_grid_name = model['diseq_grid_name']
     use_conv_flag = model['use_conv_flag']
@@ -1069,7 +1166,7 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                            beta, phi, theta, species_vert_gradient, He_fraction,
                            T_input, X_input, P_param_set, log_P_slope_phot,
                            log_P_slope_arr, Na_K_fixed_ratio, diseq_grid_name, 
-                           constant_gravity, chemistry_grid, PT_penalty, T_eq, r_profile, 
+                           constant_gravity, chemistry_grid, PT_penalty, T_eq, mu_back, r_profile, 
                            fill_H_He, r_input, r_up_input, r_low_input, dr_input,
                            X_param_names, PT_param_names, use_conv_flag, 
                            silent_unphys_warns)
@@ -1083,9 +1180,11 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
     r_m, log_n_max, fractional_scale_height, \
     r_i_real, r_i_complex, log_X_Mie, \
     P_cloud_bottom, kappa_cloud_eddysed, \
-    g_cloud_eddysed, w_cloud_eddysed = unpack_cloud_params(param_names, cloud_params,
-                                                           cloud_model, cloud_dim, 
-                                                           N_params_cum, TwoD_type)
+    g_cloud_eddysed, w_cloud_eddysed, \
+    log_r_m_std_dev, \
+    f_both, f_aerosol_1, f_aerosol_2, f_clear = unpack_cloud_params(param_names, cloud_params,
+                                                                    cloud_model, cloud_dim, 
+                                                                    N_params_cum, TwoD_type)
     
     # Compute the scale height (for fuzzy deck aerosol models)
     if is_physical == False:
@@ -1106,12 +1205,19 @@ def make_atmosphere(planet, model, P, P_ref, R_p_ref, PT_params = [],
                   'dphi': dphi, 'dtheta': dtheta, 'kappa_cloud_0': kappa_cloud_0, 
                   'P_cloud': P_cloud, 'f_cloud': f_cloud, 'phi_cloud_0': phi_cloud_0, 
                   'theta_cloud_0': theta_cloud_0, 'a': a, 'gamma': gamma, 
-                  'is_physical': is_physical,
-                  'H': H, 'r_m': r_m, 'log_n_max': log_n_max, 'fractional_scale_height': fractional_scale_height,
-                  'aerosol_species': aerosol_species, 'r_i_real': r_i_real, 'r_i_complex': r_i_complex, 'log_X_Mie': log_X_Mie,
+                  'is_physical': is_physical, 'mu_back': mu_back,
+                  'H': H, 'r_m': r_m, 'log_n_max': log_n_max, 
+                  'fractional_scale_height': fractional_scale_height,
+                  'aerosol_species': aerosol_species, 'r_i_real': r_i_real, 
+                  'r_i_complex': r_i_complex, 'log_X_Mie': log_X_Mie,
                   'P_cloud_bottom' : P_cloud_bottom, 
-                  'kappa_cloud_eddysed' : kappa_cloud_eddysed, 'g_cloud_eddysed' : g_cloud_eddysed, 'w_cloud_eddysed' : w_cloud_eddysed,
-                 }
+                  'kappa_cloud_eddysed' : kappa_cloud_eddysed,
+                  'g_cloud_eddysed' : g_cloud_eddysed, 
+                  'w_cloud_eddysed' : w_cloud_eddysed,
+                  'log_r_m_std_dev' : log_r_m_std_dev,
+                  'f_both' : f_both, 'f_aerosol_1' : f_aerosol_1, 
+                  'f_aerosol_2' : f_aerosol_2, 'f_clear' : f_clear,
+                  }
 
     return atmosphere
 
@@ -1166,7 +1272,7 @@ def check_atmosphere_physical(atmosphere, opac, silent_unphys_warns = False):
         # For line-by-line models, there is not fine temperature grid
         else:
             return True
-            
+
 
 def compute_spectrum(planet, star, model, atmosphere, opac, wl,
                      spectrum_type = 'transmission', save_spectrum = False,
@@ -1242,6 +1348,7 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     scattering = model['scattering']
     reflection = model['reflection']
     reflection_up_to_5um = model['reflection_up_to_5um']
+    lognormal_logwidth_free = model['lognormal_logwidth_free']
 
     # Check that the requested spectrum model is supported
     if (spectrum_type not in ['transmission', 'emission', 'direct_emission',
@@ -1305,6 +1412,21 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
     kappa_cloud_eddysed = atmosphere['kappa_cloud_eddysed']
     g_cloud_eddysed = atmosphere['g_cloud_eddysed']
     w_cloud_eddysed = atmosphere['w_cloud_eddysed']
+    log_r_m_std_dev = atmosphere['log_r_m_std_dev']
+    f_both = atmosphere['f_both']
+    f_aerosol_1 = atmosphere['f_aerosol_1']
+    f_aerosol_2 = atmosphere['f_aerosol_2']
+    f_clear = atmosphere['f_clear']
+
+    # Normalize the fractions so they add to one
+    # This step also occurs in retrieval.py, so this is just for forward models 
+    # round to avoid errors from when its pre-normalized in the retrieval.py
+    if round(f_both + f_aerosol_1 + f_aerosol_2 + f_clear) != 1.0:
+        sum_to_normalize_to = f_both + f_aerosol_1 + f_aerosol_2 + f_clear
+        f_both = f_both/(sum_to_normalize_to)
+        f_aerosol_1 = f_aerosol_1/(sum_to_normalize_to)
+        f_aerosol_2 = f_aerosol_2/(sum_to_normalize_to)
+        f_clear = f_clear/(sum_to_normalize_to)
 
     # Check if haze enabled in the cloud model
     if ('haze' in model['cloud_type']):
@@ -1373,6 +1495,9 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
         Rayleigh_stored = opac['Rayleigh_stored']
         ff_stored = opac['ff_stored']
         bf_stored = opac['bf_stored']
+        aerosol_stored = opac['aerosol_stored']
+
+        # aerosol_grid = opac['aerosol_grid']
 
         # Also unpack fine temperature and pressure grids from pre-interpolation
         T_fine = opac['T_fine']
@@ -1385,131 +1510,13 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
             # How the cloud type is defined and whether or not 
             # aerosol grid is being used or not 
             if (model['cloud_model'] == 'Mie'):
+                n_aerosol, sigma_ext_cloud, \
+                g_cloud, w_cloud = compute_relevant_Mie_properties(model, aerosol_species, aerosol_stored,
+                                                                   P, wl, r, H, n, r_m, r_i_real, r_i_complex,
+                                                                   P_cloud, P_cloud_bottom, log_X_Mie,
+                                                                   log_n_max, fractional_scale_height,
+                                                                   lognormal_logwidth_free, log_r_m_std_dev)
 
-                # Load in the aerosol grid for compositionally specific aerosols
-                aerosol_grid = model['aerosol_grid']
-
-                # Create a wl_Mie array (which is at R = 1000) for file_read or constant
-                # refractive indices
-                wl_Mie = wl_grid_constant_R(wl[0], wl[-1], 1000)
-
-                # If its a fuzzy deck cloud type
-                if (model['cloud_type'] == 'fuzzy_deck'):
-                    
-                    # Check to see if it is file_read or constant refractive index
-                    if ((aerosol_species == ['free']) or (aerosol_species == ['file_read'])):
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud_free(P, wl, wl_Mie, r, H, n,
-                                                          r_m, r_i_real, r_i_complex, model['cloud_type'],
-                                                          P_cloud = P_cloud,
-                                                          log_n_max = log_n_max, 
-                                                          fractional_scale_height = fractional_scale_height)
-
-                    # Otherwise, use the aerosol_grid to and pull radiative properties
-                    else: 
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                     r_m, aerosol_species,
-                                                     cloud_type = model['cloud_type'],
-                                                     aerosol_grid = aerosol_grid,
-                                                     P_cloud = P_cloud,
-                                                     log_n_max = log_n_max, 
-                                                     fractional_scale_height = fractional_scale_height)
-
-                # If its a slab
-                elif (model['cloud_type'] == 'slab' or model['cloud_type'] == 'one_slab'):
-
-                    if ((aerosol_species == ['free']) or (aerosol_species == ['file_read'])):
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud_free(P, wl, wl_Mie, r, H, n,
-                                                        r_m, r_i_real, r_i_complex, model['cloud_type'],
-                                                        log_X_Mie = log_X_Mie,
-                                                        P_cloud = P_cloud,
-                                                        P_cloud_bottom = P_cloud_bottom)
-
-                    else: 
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                    r_m, aerosol_species,
-                                                    cloud_type = model['cloud_type'],
-                                                    aerosol_grid = aerosol_grid,
-                                                    log_X_Mie = log_X_Mie,
-                                                    P_cloud = P_cloud,
-                                                    P_cloud_bottom = P_cloud_bottom)
-                            
-                          
-                # If its a uniform X run
-                elif (model['cloud_type'] == 'uniform_X'):
-
-                    if ((aerosol_species == ['free']) or (aerosol_species == ['file_read'])):
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud_free(P, wl, wl_Mie, r, H, n,
-                                                          r_m, r_i_real, r_i_complex, model['cloud_type'],
-                                                          log_X_Mie = log_X_Mie)
-
-                    else: 
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                     r_m, aerosol_species,
-                                                     cloud_type = model['cloud_type'],
-                                                     aerosol_grid = aerosol_grid,
-                                                     log_X_Mie = log_X_Mie)
-                        
-                # If its an opaque deck + uniform X run
-                elif (model['cloud_type'] == 'opaque_deck_plus_uniform_X'):
-
-                    if ((aerosol_species == ['free']) or (aerosol_species == ['file_read'])):
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud_free(P, wl, wl_Mie, r, H, n,
-                                                          r_m, r_i_real, r_i_complex, model['cloud_type'],
-                                                          log_X_Mie = log_X_Mie,
-                                                          P_cloud = P_cloud)
-
-                    else: 
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                     r_m, aerosol_species,
-                                                     cloud_type = model['cloud_type'],
-                                                     aerosol_grid = aerosol_grid,
-                                                     log_X_Mie = log_X_Mie,
-                                                     P_cloud = P_cloud)
-
-                # If its a opaque_deck_plus_slab run 
-                elif (model['cloud_type'] == 'opaque_deck_plus_slab'):
-
-                    if ((aerosol_species == ['free']) or (aerosol_species == ['file_read'])):
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud_free(P, wl, wl_Mie, r, H, n,
-                                                        r_m, r_i_real, r_i_complex, model['cloud_type'],
-                                                        log_X_Mie = log_X_Mie,
-                                                        P_cloud = P_cloud,
-                                                        P_cloud_bottom = P_cloud_bottom)
-
-                    else: 
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                    r_m, aerosol_species,
-                                                    cloud_type = model['cloud_type'],
-                                                    aerosol_grid = aerosol_grid,
-                                                    log_X_Mie = log_X_Mie,
-                                                    P_cloud = P_cloud,
-                                                    P_cloud_bottom = P_cloud_bottom)
-                        
-                # If its a fuzzy_deck_plus_slab run 
-                elif (model['cloud_type'] == 'fuzzy_deck_plus_slab'):
-
-                        n_aerosol, sigma_ext_cloud, \
-                        g_cloud, w_cloud = Mie_cloud(P, wl, r, H, n,
-                                                     r_m, aerosol_species,
-                                                     cloud_type = model['cloud_type'],
-                                                     aerosol_grid = aerosol_grid,
-                                                     P_cloud = P_cloud,
-                                                     log_n_max = log_n_max, 
-                                                     fractional_scale_height = fractional_scale_height,
-                                                     log_X_Mie = log_X_Mie,
-                                                     P_cloud_bottom = P_cloud_bottom)
-
-            
             else:
 
                 # Generate empty arrays so the dark god numba is satisfied
@@ -1533,7 +1540,8 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
                 P_cloud = np.array([P_cloud])
 
             # Create the kappa arrays
-            kappa_gas, kappa_Ray, kappa_cloud = extinction(chemical_species, active_species,
+            kappa_gas, kappa_Ray, \
+            kappa_cloud, kappa_cloud_separate = extinction(chemical_species, active_species,
                                                            CIA_pairs, ff_pairs, bf_species,
                                                            n, T, P, wl, X, X_active, X_CIA, 
                                                            X_ff, X_bf, a, gamma, P_cloud, 
@@ -1548,27 +1556,61 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
             # If we read in an eddysed file (from PICASO or VIRGA) that
             # contains the single scattering albedo, asymmetry parameter, or kappa_cloud
             if model['cloud_model'] == 'eddysed':
-                w_cloud = w_cloud_eddysed
-                g_cloud = g_cloud_eddysed
-                kappa_cloud = kappa_cloud_eddysed
-            
-            # Else, we need to restructure w_cloud and g_cloud to span by layer 
-            # For Mie models with 1 species, the g and w can be held constant with each layer since
-            # Kappa cloud will encode where clouds are
-            # For models that are cloud free, you still need a g and w that's just an array of 0s
-            # For Mie models with more than one species, we need to be more careful with the g and w array
-            elif scattering == True or reflection == True:
-                if len(aerosol_species) == 1 or len(aerosol_species) == 0:
-                    w_cloud = np.ones_like(kappa_cloud)*w_cloud
-                    g_cloud = np.ones_like(kappa_cloud)*g_cloud
 
-                # Need to make a g and w array that vary with pressure layer where aerosols actually are 
-                # I have yet to implement this, but the relevant code to weigh g and w is found here 
-                # https://github.com/natashabatalha/virga/blob/ffa82d48ba77d841c73bb7b33793397d5a17413d/virga/justdoit.py#L191
+                # Shenanigans so that the eddysed/picaso arrays work with whats already in POSEIDON
+                w_cloud_array = []
+                g_cloud_array = []
+                kappa_cloud_separate = []
+
+                w_cloud_array.append(w_cloud_eddysed)
+                g_cloud_array.append(g_cloud_eddysed)
+                kappa_cloud_separate.append(kappa_cloud_eddysed)
+
+                w_cloud = np.array(w_cloud_array)
+                g_cloud = np.array(g_cloud_array)
+                kappa_cloud = np.array(kappa_cloud_eddysed)
+                kappa_cloud_separate = np.array(kappa_cloud_separate)
+            
+            # Else, we need w and g from the precomputed aerosol database
+            # We loop over each aerosol species and reshape the w and g arrays to have the same 
+            # 4d shape as the kappa arrays 
+            # They are then looped over in toon emission and toon reflection 
+            elif scattering == True or reflection == True:
+
+                # Initialise w_cloud and g_cloud arrays
+                # Shape = (Aerosol_species, pressure, sector, zone, wl)
+                w_cloud_array = []
+                g_cloud_array = []
+
+                if (model['cloud_type'] == 'opaque_deck_plus_slab') or (model['cloud_type'] == 'opaque_deck_plus_uniform_X'):
+                    if (model['cloud_type'] == 'opaque_deck_plus_slab') or (model['cloud_type'] == 'opaque_deck_plus_uniform_X'):
+                        #Adds a fake layer of w and g which, when multiplied by kappa_deck, will give 0 opacity anyway
+                        w_cloud_array.append((np.zeros_like(kappa_cloud)).tolist())
+                        g_cloud_array.append((np.zeros_like(kappa_cloud)).tolist())
+
+                if len(aerosol_species) != 0:
+                    for aerosol in range(len(w_cloud)):
+                        # For each w and g for each aerosol, make it have the same shape as kappa_cloud
+                        # turn into a list so it doesn't end up being an array of arrays 
+                        w_cloud_array.append((np.ones_like(kappa_cloud)*w_cloud[aerosol]).tolist())
+                        g_cloud_array.append((np.ones_like(kappa_cloud)*g_cloud[aerosol]).tolist())
                 else:
-                    raise Exception('Only 1 aerosol species supported for scattering')
+                    # Just a list of 0s
+                    w_cloud_array.append((np.ones_like(kappa_gas)*w_cloud).tolist())
+                    g_cloud_array.append((np.ones_like(kappa_gas)*g_cloud).tolist())
+                
+                # Turn into an array so numba in toon functions is happy with indexing 
+                w_cloud = np.array(w_cloud_array)
+                g_cloud = np.array(g_cloud_array)
             
+            # two doesn't work for transmission right now 
+            elif spectrum_type == 'transmission' and (len(aerosol_species) == 2) and (cloud_dim == 2):
+                raise Exception('Cannot do patchy multiple clouds in transmission yet (fix this elijah)')
             
+           # elif (thermal == True) and (scattering == False) and (len(aerosol_species) == 2):
+           #     raise Exception('Cannot do patchy multiple clouds in thermal without scattering yet (fix this elijah)')
+         
+
         # Running POSEIDON on the GPU
         elif (device == 'gpu'):
 
@@ -1603,12 +1645,20 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
                                           enable_haze, enable_deck,
                                           enable_surface, N_sectors, N_zones, 
                                           T_fine, log_P_fine, P_surf, P_deep)
+            
+        # A dummy array for emission and reflection Toon, so that its easier to port over 
+        # Changes to surfaces in next update
+        # Only uses surfaces in emission_Toon and reflection when hard_surface = 1
+        surf_reflect = np.full_like(wl, -1) 
 
     # Generate transmission spectrum        
     if (spectrum_type == 'transmission'):
 
         if (device == 'gpu'):
             raise Exception("GPU transmission spectra not yet supported.")
+        
+        # if (cloud_dim == 2) and (len(aerosol_species) > 1):
+        #     raise Exception('Patchy clouds for models with two aerosol species only available for thermal scattering and reflection models.')
 
         # Call the core TRIDENT routine to compute the transmission spectrum
         spectrum = TRIDENT(P, r, r_up, r_low, dr, wl, (kappa_gas + kappa_Ray), 
@@ -1672,14 +1722,55 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
         # Store differential extinction optical depth across each layer
         dtau_tot = np.ascontiguousarray(kappa_tot * dz.reshape((len(P), 1)))
 
+        # If there are patchy clouds
+        # need to have kappa_cloud_separate_clear
+        # And if aerosol species = 2
+        # will need kappa_cloud_separate_1 and kappa_cloud_separate_2
+        # and kappa_tot_1 kappa_tot_2 and dtaut_tot_1 and dtau_tot_2
         if cloud_dim == 2:
-            kappa_cloud_clear = np.zeros_like(kappa_cloud)
-            kappa_tot_clear = (kappa_gas[:,0,zone_idx,:] + kappa_Ray[:,0,zone_idx,:] +
-                                kappa_cloud_clear[:,0,zone_idx,:])
-            dtau_tot_clear = np.ascontiguousarray(kappa_tot_clear * dz.reshape((len(P), 1)))
+
+            # If there is only one cloud species there are two models: cloudy and clear
+            if (len(aerosol_species) == 1):
+
+                # Clear Model 
+                kappa_cloud_clear = np.zeros_like(kappa_cloud)
+                kappa_cloud_separate_clear = np.zeros_like(kappa_cloud_separate)
+                kappa_tot_clear = (kappa_gas[:,0,zone_idx,:] + kappa_Ray[:,0,zone_idx,:] +
+                                   kappa_cloud_clear[:,0,zone_idx,:])
+                dtau_tot_clear = np.ascontiguousarray(kappa_tot_clear * dz.reshape((len(P), 1)))
+            
+            # If there are two cloud species there are four models: cloudy (both species, which is default)
+            # the first aerosol alone, the second aerosol alone, and clear 
+            elif (len(aerosol_species) == 2):
+                
+                # Clear Model 
+                kappa_cloud_clear = np.zeros_like(kappa_cloud)
+                kappa_cloud_separate_clear = np.zeros_like(kappa_cloud_separate)
+                kappa_tot_clear = (kappa_gas[:,0,zone_idx,:] + kappa_Ray[:,0,zone_idx,:] +
+                                   kappa_cloud_clear[:,0,zone_idx,:])
+                dtau_tot_clear = np.ascontiguousarray(kappa_tot_clear * dz.reshape((len(P), 1)))
+
+                # Aerosol 1
+                kappa_cloud_aerosol_1 = kappa_cloud_separate[0]
+                kappa_cloud_separate_aerosol_1 = np.array([kappa_cloud_separate[0],np.zeros_like(kappa_cloud)])
+                kappa_tot_aerosol_1 = (kappa_gas[:,0,zone_idx,:] + kappa_Ray[:,0,zone_idx,:] +
+                                       kappa_cloud_aerosol_1[:,0,zone_idx,:])
+                dtau_tot_aerosol_1 = np.ascontiguousarray(kappa_tot_aerosol_1 * dz.reshape((len(P), 1)))
+
+                # Aerosol 2
+                kappa_cloud_aerosol_2 = kappa_cloud_separate[1]
+                kappa_cloud_separate_aerosol_2 = np.array([np.zeros_like(kappa_cloud),kappa_cloud_separate[1]])
+                kappa_tot_aerosol_2 = (kappa_gas[:,0,zone_idx,:] + kappa_Ray[:,0,zone_idx,:] +
+                                       kappa_cloud_aerosol_2[:,0,zone_idx,:])
+                dtau_tot_aerosol_2 = np.ascontiguousarray(kappa_tot_aerosol_2 * dz.reshape((len(P), 1)))
 
         # Without scattering, compute single steam radiative transfer
         if (scattering == False):
+
+            # 2D clouds are not available for single stream emission, only thermal scattering
+            if (cloud_dim == 2):
+                raise Exception("Patchy clouds not available for single-stream emission. " +    
+                                "Set scattering=True in define_model() or reach out to developers.")
 
             # Compute planet flux (on CPU or GPU)
             if (device == 'cpu'):
@@ -1690,25 +1781,61 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
         # With scattering, compute emission using PICASO's Toon implementation
         elif (scattering == True):
 
-            # Compute planet flux including scattering (PICASO implementation), see emission.py for details
-            F_p, dtau = emission_Toon(P, T, wl, dtau_tot, 
-                                        kappa_Ray, kappa_cloud, kappa_tot,
-                                        w_cloud, g_cloud, zone_idx,
-                                        hard_surface = 0, tridiagonal = 0, 
-                                        Gauss_quad = 5, numt = 1)
-            
-            dtau = np.flip(dtau, axis=0)   # Flip optical depth pressure axis back
+                # Compute planet flux including scattering (PICASO implementation), see emission.py for details
+                # This includes all clouds combined when there is fractional clouds 
+                F_p, dtau = emission_Toon(P, T, wl, dtau_tot, 
+                                          kappa_Ray, kappa_cloud, kappa_tot,
+                                          w_cloud, g_cloud, zone_idx,
+                                          surf_reflect, kappa_cloud_separate,
+                                          hard_surface = 0, tridiagonal = 0, 
+                                          Gauss_quad = 5, numt = 1)
+                
+                dtau = np.flip(dtau, axis = 0)   # Flip optical depth pressure axis back
 
-            # For 1 + 1D fractional clouds
-            if cloud_dim == 2:
-                
-                F_p_clear, dtau_clear = emission_Toon(P, T, wl, dtau_tot_clear, 
-                                                        kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
-                                                        w_cloud, g_cloud, zone_idx,
-                                                        hard_surface = 0, tridiagonal = 0, 
-                                                        Gauss_quad = 5, numt = 1)
-                
-                F_p = (f_cloud*F_p) + ((1-f_cloud)*F_p_clear)
+                if cloud_dim == 2:
+                    
+                    # 1D + 1D is clear + cloudy, so need to compute clear model here 
+                    if (len(aerosol_species) == 1):
+
+                        F_p_clear, dtau_clear = emission_Toon(P, T, wl, dtau_tot_clear, 
+                                                              kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
+                                                              w_cloud, g_cloud, zone_idx,
+                                                              surf_reflect, kappa_cloud_separate_clear,
+                                                              hard_surface = 0, tridiagonal = 0, 
+                                                              Gauss_quad = 5, numt = 1)
+                    
+                        F_p = (f_cloud * F_p) + ((1 - f_cloud) * F_p_clear)
+
+                    # 1D + 1D + 1D + 1D is clear + cloudy (both) + cloudy (aerosol 1) + cloudy (aerosol 2)
+                    # So need to compute three additional models 
+                    if (len(aerosol_species) == 2):
+
+                        F_p_clear, dtau_clear = emission_Toon(P, T, wl, dtau_tot_clear, 
+                                                              kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
+                                                              w_cloud, g_cloud, zone_idx,
+                                                              surf_reflect, kappa_cloud_separate_clear,
+                                                              hard_surface = 0, tridiagonal = 0, 
+                                                              Gauss_quad = 5, numt = 1)
+
+                        F_p_aerosol_1, dtau_aerosol_1 = emission_Toon(P, T, wl, dtau_tot_aerosol_1, 
+                                                                      kappa_Ray, kappa_cloud_aerosol_1, kappa_tot_aerosol_1,
+                                                                      w_cloud, g_cloud, zone_idx,
+                                                                      surf_reflect, kappa_cloud_separate_aerosol_1,
+                                                                      hard_surface = 0, tridiagonal = 0, 
+                                                                      Gauss_quad = 5, numt = 1)
+                        
+                        F_p_aerosol_2, dtau_aerosol_2 = emission_Toon(P, T, wl, dtau_tot_aerosol_2, 
+                                                                      kappa_Ray, kappa_cloud_aerosol_2, kappa_tot_aerosol_2,
+                                                                      w_cloud, g_cloud, zone_idx,     
+                                                                      surf_reflect, kappa_cloud_separate_aerosol_2,
+                                                                      hard_surface = 0, tridiagonal = 0, 
+                                                                      Gauss_quad = 5, numt = 1)
+                        
+                        # Combine fluxes
+                        F_p = ((f_both * F_p) + 
+                               (f_aerosol_1 * F_p_aerosol_1) + 
+                               (f_aerosol_2 * F_p_aerosol_2) + 
+                               (f_clear * F_p_clear))
                 
         else:
             raise Exception("Error: Invalid scattering option")
@@ -1732,68 +1859,181 @@ def compute_spectrum(planet, star, model, atmosphere, opac, wl,
                 kappa_Ray_cut = kappa_Ray[:,:,:,:index_5um]
                 kappa_cloud_cut = kappa_cloud[:,:,:,:index_5um]
                 kappa_tot_cut = kappa_tot[:,:index_5um]
-                w_cloud_cut = w_cloud[:,:,:,:index_5um]
-                g_cloud_cut = g_cloud[:,:,:,:index_5um]
+                w_cloud_cut = w_cloud[:,:,:,:,:index_5um]
+                g_cloud_cut = g_cloud[:,:,:,:,:index_5um]
+                kappa_cloud_separate_cut = kappa_cloud_separate[:,:,:,:,:index_5um]
+                surf_reflect_cut = surf_reflect[:index_5um]
 
                 # Compute the albedo using PICASO's implementation (see emission.py for details)
                 albedo_cut = reflection_Toon(P, wl_cut, dtau_tot_cut,
                                              kappa_Ray_cut, kappa_cloud_cut, kappa_tot_cut,
                                              w_cloud_cut, g_cloud_cut, zone_idx,
+                                             surf_reflect_cut, kappa_cloud_separate_cut,
                                              single_phase = 3, multi_phase = 0,
-                                             frac_a = 1, frac_b = -1, frac_c = 2, constant_back = -0.5, constant_forward = 1,
+                                             frac_a = 1, frac_b = -1, frac_c = 2, 
+                                             constant_back = -0.5, constant_forward = 1,
                                              Gauss_quad = 5, numt = 1,
-                                             toon_coefficients=0, tridiagonal=0, b_top=0)
+                                             toon_coefficients = 0, tridiagonal = 0, b_top = 0)
                 
                 # Create an albedo of 0's from 5um onwards
                 albedo_zeros = np.zeros(len(wl[index_5um:]))
 
-                # Joint both arrays together
+                # Join both arrays together
                 albedo = np.concatenate((albedo_cut, albedo_zeros))
 
                 # For 1 + 1D patchy clouds
                 if cloud_dim == 2:
 
-                    dtau_tot_clear_cut = dtau_tot_clear[:,:index_5um]
-                    kappa_cloud_clear_cut = kappa_cloud_clear[:,:,:,:index_5um]
-                    kappa_tot_clear_cut = kappa_tot_clear[:,:index_5um]
+                    if (len(aerosol_species) == 1):
 
-                    albedo_clear_cut = reflection_Toon(P, wl_cut, dtau_tot_clear_cut,
-                                                    kappa_Ray_cut, kappa_cloud_clear_cut, kappa_tot_clear_cut,
-                                                    w_cloud_cut, g_cloud_cut, zone_idx,
-                                                    single_phase = 3, multi_phase = 0,
-                                                    frac_a = 1, frac_b = -1, frac_c = 2, constant_back = -0.5, constant_forward = 1,
-                                                    Gauss_quad = 5, numt = 1,
-                                                    toon_coefficients=0, tridiagonal=0, b_top=0)
-                    
+                        dtau_tot_clear_cut = dtau_tot_clear[:,:index_5um]
+                        kappa_cloud_clear_cut = kappa_cloud_clear[:,:,:,:index_5um]
+                        kappa_tot_clear_cut = kappa_tot_clear[:,:index_5um]
+                        kappa_cloud_separate_clear_cut = kappa_cloud_separate_clear[:,:,:,:,:index_5um]
 
-                    albedo_clear = np.concatenate((albedo_clear_cut, albedo_zeros))
-                    
-                    albedo = (f_cloud*albedo) + ((1-f_cloud)*albedo_clear)
+                        albedo_clear_cut = reflection_Toon(P, wl_cut, dtau_tot_clear_cut,
+                                                           kappa_Ray_cut, kappa_cloud_clear_cut, kappa_tot_clear_cut,
+                                                           w_cloud_cut, g_cloud_cut, zone_idx,
+                                                           surf_reflect_cut, kappa_cloud_separate_clear_cut,
+                                                           single_phase = 3, multi_phase = 0,
+                                                           frac_a = 1, frac_b = -1, frac_c = 2,
+                                                           constant_back = -0.5, constant_forward = 1,
+                                                           Gauss_quad = 5, numt = 1,
+                                                           toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+
+                        albedo_clear = np.concatenate((albedo_clear_cut, albedo_zeros))
+                        
+                        albedo = (f_cloud * albedo) + ((1 - f_cloud) * albedo_clear)
+
+                    # 1D + 1D + 1D + 1D is clear + cloudy (both) + cloudy (aerosol 1) + cloudy (aerosol 2)
+                    # So need to compute three additional models 
+                    if (len(aerosol_species) == 2):
+
+                        dtau_tot_clear_cut = dtau_tot_clear[:,:index_5um]
+                        kappa_cloud_clear_cut = kappa_cloud_clear[:,:,:,:index_5um]
+                        kappa_tot_clear_cut = kappa_tot_clear[:,:index_5um]
+                        kappa_cloud_separate_clear_cut = kappa_cloud_separate_clear[:,:,:,:,:index_5um]
+
+                        albedo_clear_cut = reflection_Toon(P, wl_cut, dtau_tot_clear_cut,
+                                                           kappa_Ray_cut, kappa_cloud_clear_cut, kappa_tot_clear_cut,
+                                                           w_cloud_cut, g_cloud_cut, zone_idx,
+                                                           surf_reflect_cut, kappa_cloud_separate_clear_cut,
+                                                           single_phase = 3, multi_phase = 0,
+                                                           frac_a = 1, frac_b = -1, frac_c = 2,
+                                                           constant_back = -0.5, constant_forward = 1,
+                                                           Gauss_quad = 5, numt = 1,
+                                                           toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo_clear = np.concatenate((albedo_clear_cut, albedo_zeros))
+                        
+                        dtau_tot_aerosol_1_cut = dtau_tot_aerosol_1[:,:index_5um]
+                        kappa_cloud_aerosol_1_cut = kappa_cloud_aerosol_1[:,:,:,:index_5um]
+                        kappa_tot_aerosol_1_cut = kappa_tot_aerosol_1[:,:index_5um]
+                        kappa_cloud_separate_aerosol_1_cut = kappa_cloud_separate_aerosol_1[:,:,:,:,:index_5um]
+
+                        albedo_aerosol_1_cut = reflection_Toon(P, wl, dtau_tot_aerosol_1_cut,
+                                                               kappa_Ray_cut, kappa_cloud_aerosol_1_cut, kappa_tot_aerosol_1_cut,
+                                                               w_cloud_cut, g_cloud_cut, zone_idx,
+                                                               surf_reflect_cut, kappa_cloud_separate_aerosol_1_cut,
+                                                               single_phase = 3, multi_phase = 0,
+                                                               frac_a = 1, frac_b = -1, frac_c = 2,
+                                                               constant_back = -0.5, constant_forward = 1,
+                                                               Gauss_quad = 5, numt = 1,
+                                                               toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo_aerosol_1 = np.concatenate((albedo_aerosol_1_cut, albedo_zeros))
+
+                        dtau_tot_aerosol_2_cut = dtau_tot_aerosol_2[:,:index_5um]
+                        kappa_cloud_aerosol_2_cut = kappa_cloud_aerosol_2[:,:,:,:index_5um]
+                        kappa_tot_aerosol_2_cut = kappa_tot_aerosol_2[:,:index_5um]
+                        kappa_cloud_separate_aerosol_2_cut = kappa_cloud_separate_aerosol_2[:,:,:,:,:index_5um]
+                        
+                        albedo_aerosol_2_cut = reflection_Toon(P, wl, dtau_tot_aerosol_2_cut,
+                                                               kappa_Ray_cut, kappa_cloud_aerosol_2_cut, kappa_tot_aerosol_2_cut,
+                                                               w_cloud, g_cloud, zone_idx,
+                                                               surf_reflect_cut, kappa_cloud_separate_aerosol_2_cut,
+                                                               single_phase = 3, multi_phase = 0,
+                                                               frac_a = 1, frac_b = -1, frac_c = 2,
+                                                               constant_back = -0.5, constant_forward = 1,
+                                                               Gauss_quad = 5, numt = 1,
+                                                               toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo_aerosol_2 = np.concatenate((albedo_aerosol_2_cut, albedo_zeros))
+                        
+                        albedo = ((f_both * albedo) + 
+                                  (f_aerosol_1 * albedo_aerosol_1) + 
+                                  (f_aerosol_2 * albedo_aerosol_2) + 
+                                  (f_clear * albedo_clear))
 
 
             # Else, just use the default arrays
             else:
                 
                 albedo = reflection_Toon(P, wl, dtau_tot,
-                            kappa_Ray, kappa_cloud, kappa_tot,
-                            w_cloud, g_cloud, zone_idx,
-                            single_phase = 3, multi_phase = 0,
-                            frac_a = 1, frac_b = -1, frac_c = 2, constant_back = -0.5, constant_forward = 1,
-                            Gauss_quad = 5, numt = 1,
-                            toon_coefficients=0, tridiagonal=0, b_top=0)
+                                         kappa_Ray, kappa_cloud, kappa_tot,
+                                         w_cloud, g_cloud, zone_idx,
+                                         surf_reflect, kappa_cloud_separate,
+                                         single_phase = 3, multi_phase = 0,
+                                         frac_a = 1, frac_b = -1, frac_c = 2,
+                                         constant_back = -0.5, constant_forward = 1,
+                                         Gauss_quad = 5, numt = 1,
+                                         toon_coefficients = 0, tridiagonal = 0, b_top = 0)
                 
                 if cloud_dim == 2:
+                    # 1D + 1D is clear + cloudy, so need to compute clear model here 
+                    if (len(aerosol_species) == 1):
+                        albedo_clear = reflection_Toon(P, wl, dtau_tot_clear,
+                                                       kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
+                                                       w_cloud, g_cloud, zone_idx,
+                                                       surf_reflect, kappa_cloud_separate_clear,
+                                                       single_phase = 3, multi_phase = 0,
+                                                       frac_a = 1, frac_b = -1, frac_c = 2,
+                                                       constant_back = -0.5, constant_forward = 1,
+                                                       Gauss_quad = 5, numt = 1,
+                                                       toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
 
-                    albedo_clear = reflection_Toon(P, wl, dtau_tot_clear,
-                                            kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
-                                            w_cloud, g_cloud, zone_idx,
-                                            single_phase = 3, multi_phase = 0,
-                                            frac_a = 1, frac_b = -1, frac_c = 2, constant_back = -0.5, constant_forward = 1,
-                                            Gauss_quad = 5, numt = 1,
-                                            toon_coefficients=0, tridiagonal=0, b_top=0)
-                    
+                        albedo = (f_cloud * albedo) + ((1 - f_cloud) * albedo_clear)
 
-                    albedo = (f_cloud*albedo) + ((1-f_cloud)*albedo_clear)
+                    # 1D + 1D + 1D + 1D is clear + cloudy (both) + cloudy (aerosol 1) + cloudy (aerosol 2)
+                    # So need to compute three additional models 
+                    if (len(aerosol_species) == 2):
+
+                        albedo_clear = reflection_Toon(P, wl, dtau_tot_clear,
+                                                       kappa_Ray, kappa_cloud_clear, kappa_tot_clear,
+                                                       w_cloud, g_cloud, zone_idx,
+                                                       surf_reflect, kappa_cloud_separate_clear,
+                                                       single_phase = 3, multi_phase = 0,
+                                                       frac_a = 1, frac_b = -1, frac_c = 2,
+                                                       constant_back = -0.5, constant_forward = 1,
+                                                       Gauss_quad = 5, numt = 1,
+                                                       toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo_aerosol_1 = reflection_Toon(P, wl, dtau_tot_aerosol_1,
+                                                           kappa_Ray, kappa_cloud_aerosol_1, kappa_tot_aerosol_1,
+                                                           w_cloud, g_cloud, zone_idx,
+                                                           surf_reflect, kappa_cloud_separate_aerosol_1,
+                                                           single_phase = 3, multi_phase = 0,
+                                                           frac_a = 1, frac_b = -1, frac_c = 2,
+                                                           constant_back = -0.5, constant_forward = 1,
+                                                           Gauss_quad = 5, numt = 1,
+                                                           toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo_aerosol_2 = reflection_Toon(P, wl, dtau_tot_aerosol_2,
+                                                           kappa_Ray, kappa_cloud_aerosol_2, kappa_tot_aerosol_2,
+                                                           w_cloud, g_cloud, zone_idx,
+                                                           surf_reflect, kappa_cloud_separate_aerosol_2,
+                                                           single_phase = 3, multi_phase = 0,
+                                                           frac_a = 1, frac_b = -1, frac_c = 2,
+                                                           constant_back = -0.5, constant_forward = 1,
+                                                           Gauss_quad = 5, numt = 1,
+                                                           toon_coefficients = 0, tridiagonal = 0, b_top = 0)
+                        
+                        albedo = ((f_both * albedo) + 
+                                  (f_aerosol_1 * albedo_aerosol_1) + 
+                                  (f_aerosol_2 * albedo_aerosol_2) + 
+                                  (f_clear * albedo_clear))
 
                     
         # Calculate effective photosphere radius at tau = 2/3
@@ -2007,7 +2247,7 @@ def load_data(data_dir, datasets, instruments, wl_model, offset_datasets = None,
     # For relative offsets, find which data indices the offset applies to
     if (offset_datasets is not None):
         
-        # Initialize the offset datasets
+        # Initialise the offset datasets
         offset_datasets = np.array(offset_datasets)
 
         # If there is only one dataset with an offset
@@ -2226,7 +2466,10 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
         err_log_g_phot = 0.1
 
     # Unpack data error bars (not error inflation parameter prior)
-    err_data = data['err_data']    
+    if model['high_res_method'] is None:
+        err_data = data['err_data']
+    else:
+        err_data = 1
 
     # Normalise retrieved planet radius parameter into Jupiter or Earth radii
     if (radius_unit == 'R_J'):
@@ -2253,7 +2496,7 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
         prior_ranges['d'] = [prior_ranges['d'][0]/d_norm,
                              prior_ranges['d'][1]/d_norm]
 
-    # Set default priors (used if user doesn't specify one or more priors)
+    # Set default priors (if the user doesn't specify one or more priors)
     prior_ranges_defaults = {'R_p_ref': [0.85*R_p/R_p_norm, 1.15*R_p/R_p_norm],
                              'M_p': [0.50*M_p/M_p_norm, 1.50*M_p/M_p_norm],
                              'log_g': [2.0, 5.0], 'T': [400, 3000], 
@@ -2263,7 +2506,7 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
                              'log_P1': [-6, 2], 'log_P2': [-6, 2], 
                              'log_P3': [-2, 2], 'log_P_mid': [-5, 1], 
                              'log_P_surf': [-4, 1], 'log_P_ref': [-6, 2],
-                             'log_X': [-12, -1], 
+                             'log_X': [-12, -1], 'mu_back': [2.3, 50],
                              'Delta_log_X': [-10, 10], 'Grad_log_X': [-1, 1], 
                              'log_a': [-4, 8], 'gamma': [-20, 2], 
                              'log_P_cloud': [-6, 2], 'phi_cloud': [0, 1],
@@ -2278,12 +2521,13 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
                              'log_g_fac': [log_g_phot-0.5, log_g_phot+0.5],
                              'T_phot': [T_phot, err_T_phot], 
                              'log_g_phot': [log_g_phot, err_log_g_phot], 
-                             'delta_rel': [-1.0e-3, 1.0e-3],
-                             'delta_rel_1': [-1.0e-3, 1.0e-3],
-                             'delta_rel_2': [-1.0e-3, 1.0e-3],
-                             'delta_rel_3': [-1.0e-3, 1.0e-3],
+                             'delta_rel': [-100, 100],
+                             'delta_rel_1': [-100, 100],
+                             'delta_rel_2': [-100, 100],
+                             'delta_rel_3': [-100, 100],
                              'b': [np.log10(0.001*np.min(err_data**2)),
                                    np.log10(100.0*np.max(err_data**2))],
+                             'x_tol': [0.05, 1.0],
                              'C_to_O': [0.3, 1.9], 'log_Met' : [-0.9, 3.9],
                              'log_r_m': [-3, 1], 'log_n_max': [5.0, 20.0],  
                              'fractional_scale_height': [0.1, 1], 
@@ -2294,6 +2538,10 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
                              'T_equ' : [400, 3000], 'T_int' : [400, 3000],
                              'alpha_Line' : [0, 1], 'beta_Line' : [0.25, 2],
                              'Upsilon': [-180, 180], 'log_P_X_i': [-5, 1],
+                             'K_p': [-200, 200], 'V_sys': [-100, 100],
+                             'W_conv': [0, 50], 'Delta_Phi': [-0.05, 0.05],
+                             'log_alpha_HR': [-2, 2], 'alpha_HR': [1, 10],
+                             'beta_HR': [0.1, 10],
                             }   
 
     # Iterate through parameters, ensuring we have a full set of priors
@@ -2540,5 +2788,3 @@ def set_priors(planet, star, model, data, prior_types = {}, prior_ranges = {}):
     priors = {'prior_ranges': prior_ranges, 'prior_types': prior_types}
 
     return priors
-
-
