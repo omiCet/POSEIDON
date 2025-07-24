@@ -13,7 +13,6 @@ import re
 from .utility import shared_memory_array
 from .supported_chemicals import supported_species, fastchem_supported_species, vulcan_supported_species, inactive_species
 
-vulcan_grid_list = ["VULCAN_test", "VULCAN_Grid1.1", "VULCAN_Grid2.0"] #allowed list of vulcan grids; files in inputs with name GRID_database.hdf5. to be editable by user
 
 
 def load_chemistry_grid(chemical_species, grid = 'fastchem', 
@@ -300,111 +299,106 @@ def load_vulcan_chemistry_grid(chemical_species, grid = '',
             
     '''
 
-    # Add ability to add other grids to the allowed_list at some point
-    if not grid in vulcan_grid_list:
-        raise Exception("\"" + str(grid) + "\" is not a supported grid. " + 
-                        "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
     
-    else:
-        if (rank == 0):
-            print("Reading in database for VULCAN model...")
+    if (rank == 0):
+        print("Reading in database for VULCAN model...")
 
-        # Find the directory where the user downloaded the input grid
-        input_file_path = os.environ.get("POSEIDON_input_data")
+    # Find the directory where the user downloaded the input grid
+    input_file_path = os.environ.get("POSEIDON_input_data")
 
-        if input_file_path == None:
-            raise Exception("POSEIDON cannot locate the input folder.\n" +
-                            "Please set the 'POSEIDON_input_data' variable in " +
-                            "your .bashrc or .bash_profile to point to the " +
-                            "POSEIDON input folder.")
+    if input_file_path == None:
+        raise Exception("POSEIDON cannot locate the input folder.\n" +
+                        "Please set the 'POSEIDON_input_data' variable in " +
+                        "your .bashrc or .bash_profile to point to the " +
+                        "POSEIDON input folder.")
 
-        # Load list of chemical species supported by both VULCAN and POSEIDON
-        intersection_supported_species = np.intersect1d(np.append(supported_species,inactive_species), 
-                                                    vulcan_supported_species)
-            
-        # If chemical_species = ['all'] then default to all species
-        if ('all' in chemical_species):
-            chemical_species = intersection_supported_species
-
-        # Only look for the species that are included in the VULCAN grids
-        chemical_species = np.array([species for species in chemical_species if species in intersection_supported_species])
+    # Load list of chemical species supported by both VULCAN and POSEIDON
+    intersection_supported_species = np.intersect1d(np.append(supported_species,inactive_species), 
+                                                vulcan_supported_species)
         
-        # Open chemistry grid HDF5 file
-        try: 
-            database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')
-        except Exception:
-            print("The grid you requested could not be found. Please verify that it is located in inputs")
+    # If chemical_species = ['all'] then default to all species
+    if ('all' in chemical_species):
+        chemical_species = intersection_supported_species
 
-        # Check the basic structure of the HDF5
-        if "Misc_info" not in database.keys():
-            raise Exception("\"Misc_info\" could not be found in the grid HDF5 file")
-        elif "Dimensions" not in database.keys():
-            raise Exception("\"Dimensions\" could not be found in the grid HDF5 file")
-        elif "property_names" not in database['Misc_info'].keys():
-            raise Exception("\"property_names\" could not be found in Misc_info in the grid HDF5 file")
+    # Only look for the species that are included in the VULCAN grids
+    chemical_species = np.array([species for species in chemical_species if species in intersection_supported_species])
+    
+    # Open chemistry grid HDF5 file
+    try: 
+        database = h5py.File(input_file_path + '/chemistry_grids/' + grid + '_database.hdf5', 'r')
+    except Exception:
+        print("The grid you requested could not be found. Please verify that it is located in inputs")
 
-        # Determine the axes of the grid and load in the corresponding dimensions
-        property_names = np.array(re.findall(r"[_\w]+", database['Misc_info/property_names'].asstr()[0]))
-        grid_lists = np.array([database[f'Dimensions/{prop}_list'][...] for prop in property_names], dtype=np.ndarray)
+    # Check the basic structure of the HDF5
+    if "Misc_info" not in database.keys():
+        raise Exception("\"Misc_info\" could not be found in the grid HDF5 file")
+    elif "Dimensions" not in database.keys():
+        raise Exception("\"Dimensions\" could not be found in the grid HDF5 file")
+    elif "property_names" not in database['Misc_info'].keys():
+        raise Exception("\"property_names\" could not be found in Misc_info in the grid HDF5 file")
 
-        # Find sizes of each dimension
-        dim_sizes = np.array([len(list) for list in grid_lists])
+    # Determine the axes of the grid and load in the corresponding dimensions
+    property_names = np.array(re.findall(r"[_\w]+", database['Misc_info/property_names'].asstr()[0]))
+    grid_lists = np.array([database[f'Dimensions/{prop}_list'][...] for prop in property_names], dtype=np.ndarray)
 
-        # Load other info
-        pressures = np.array(database['Misc_info/pressures'])
-        P_num = len(pressures)
-        temp_profiles = np.array(database['Misc_info/temp_profiles'])
-        conv_flags = np.array(database['Misc_info/conv_flags'])
-        conv_flags = conv_flags.reshape(dim_sizes)
+    # Find sizes of each dimension
+    dim_sizes = np.array([len(list) for list in grid_lists])
 
-        # Check that all dimensions are strictly increasing
-        for list in grid_lists:
-            if not np.all(list[:-1] <= list[1:]):
-                raise Exception("Error: values along each dimension of the grid must be provided in strictly increasing order")
-        # Check that pressure is strictly decreasing
-        if not np.all(pressures[:-1] >= pressures[1:]):
-                raise Exception("Error: pressures must be provided in strictly decreasing order")
+    # Load other info
+    pressures = np.array(database['Misc_info/pressures'])
+    P_num = len(pressures)
+    temp_profiles = np.array(database['Misc_info/temp_profiles'])
+    conv_flags = np.array(database['Misc_info/conv_flags'])
+    conv_flags = conv_flags.reshape(dim_sizes)
 
-        # Store number of chemical species
-        N_species = len(chemical_species)
+    # Check that all dimensions are strictly increasing
+    for list in grid_lists:
+        if not np.all(list[:-1] <= list[1:]):
+            raise Exception("Error: values along each dimension of the grid must be provided in strictly increasing order")
+    # Check that pressure is strictly decreasing
+    if not np.all(pressures[:-1] >= pressures[1:]):
+            raise Exception("Error: pressures must be provided in strictly decreasing order")
 
-        # Create array to store the log mixing ratios from the grid 
-        log_X_grid, _ = shared_memory_array(rank, comm, (N_species, *dim_sizes, P_num))
+    # Store number of chemical species
+    N_species = len(chemical_species)
+
+    # Create array to store the log mixing ratios from the grid 
+    log_X_grid, _ = shared_memory_array(rank, comm, (N_species, *dim_sizes, P_num))
+    
+    # Only first core needs to load the mixing ratios into shared memory
+    if (rank == 0):
+
+        # Add each chemical species to mixing ratio array
+        for q, species in enumerate(chemical_species):
+
+            # Load grid for species q, then reshape into a 4D numpy array
+            try:
+                array = np.array(database[species+'/log(X)']) #database[species+'/log(X)'] is a 2D array; axis 0 = runs, axis 1 = pressure
+            except Exception as e:
+                print(f"\"{species}/log(X)\" could not be found in the grid HDF5 file")
+                raise e
+            array = array.reshape(*dim_sizes, P_num)
+
+            # Package grid for species q into combined array
+            log_X_grid[q,...] = array
+
+    #replace all negative infinities (i.e. 0 mixing ratio) with 1E-100
+    def remove_infinities(log_X_grid):
+        log_X_grid[log_X_grid == -np.inf] = -100
+        return log_X_grid
+    log_X_grid = remove_infinities(log_X_grid)
+
+    # Close HDF5 file
+    database.close()
         
-        # Only first core needs to load the mixing ratios into shared memory
-        if (rank == 0):
+    # Force secondary processors to wait for the primary to finish
+    comm.Barrier()
 
-            # Add each chemical species to mixing ratio array
-            for q, species in enumerate(chemical_species):
+    # Package atmosphere properties
+    chemistry_grid = {'grid': grid, 'log_X_grid': log_X_grid, 'pressures': pressures, 'temp_profiles': temp_profiles, 'conv_flags':
+                    conv_flags, 'species': chemical_species, 'property_names': property_names, 'grid_lists': grid_lists}
 
-                # Load grid for species q, then reshape into a 4D numpy array
-                try:
-                    array = np.array(database[species+'/log(X)']) #database[species+'/log(X)'] is a 2D array; axis 0 = runs, axis 1 = pressure
-                except Exception as e:
-                    print(f"\"{species}/log(X)\" could not be found in the grid HDF5 file")
-                    raise e
-                array = array.reshape(*dim_sizes, P_num)
-
-                # Package grid for species q into combined array
-                log_X_grid[q,...] = array
-
-        #replace all negative infinities (i.e. 0 mixing ratio) with 1E-100
-        def remove_infinities(log_X_grid):
-            log_X_grid[log_X_grid == -np.inf] = -100
-            return log_X_grid
-        log_X_grid = remove_infinities(log_X_grid)
-
-        # Close HDF5 file
-        database.close()
-            
-        # Force secondary processors to wait for the primary to finish
-        comm.Barrier()
-
-        # Package atmosphere properties
-        chemistry_grid = {'grid': grid, 'log_X_grid': log_X_grid, 'pressures': pressures, 'temp_profiles': temp_profiles, 'conv_flags':
-                        conv_flags, 'species': chemical_species, 'property_names': property_names, 'grid_lists': grid_lists}
-
-        return chemistry_grid
+    return chemistry_grid
 
 
 def interpolate_vulcan_log_X_grid(chemistry_grid, param_names, param_values, log_P, chemical_species, return_dict = True, use_conv_flag = True):

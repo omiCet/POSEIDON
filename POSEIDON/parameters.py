@@ -5,7 +5,6 @@ Functions related to the free parameters defining a POSEIDON model.
 
 import numpy as np
 import warnings
-from .chemistry import vulcan_grid_list
 from .supported_chemicals import supported_species, inactive_species, vulcan_supported_species
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -369,10 +368,10 @@ def assign_free_params(param_species, bulk_species, object_type, PT_profile,
             # Add in parameters for additional grids here
             elif diseq_grid_name is None:
                 raise Exception("diseq_grid_name must be provided to use disequilibrium chemistry. " +
-                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
+                                "Please choose a supported VULCAN grid.")
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
-                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
+                                "Please choose a supported VULCAN grid.")
         
         N_PT_params = len(PT_params)   # Store number of P-T profile parameters
         params += PT_params            # Add P-T parameter names to combined list
@@ -608,7 +607,7 @@ def assign_free_params(param_species, bulk_species, object_type, PT_profile,
             # Add in parameters for additional grids here
             else: 
                 raise Exception("\"" + str(diseq_grid_name) + "\" is not a supported grid. " + 
-                                "Please choose a supported VULCAN grid.\nOptions: " + str(vulcan_grid_list))
+                                "Please choose a supported VULCAN grid")
             
 
             # Check which species were input by the user but not contained in the VULCAN grids
