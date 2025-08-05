@@ -549,7 +549,8 @@ def read_PT_file(PT_file_dir, PT_file_name, P_grid, P_unit = 'bar',
 
 
 def read_chem_file(chem_file_dir, chem_file_name, P_grid, chem_species_in_file, 
-                   chem_species_in_model, P_unit = 'bar', skiprows = None):
+                   chem_species_in_model, P_unit = 'bar', skiprows = None, 
+                   chem_column = 1):
     '''
     Read an external file containing mixing ratios as a function of pressure.
 
@@ -569,6 +570,11 @@ def read_chem_file(chem_file_dir, chem_file_name, P_grid, chem_species_in_file,
             (Options: bar / Pa / atm).
         skiprows (int):
             The number of rows to skip (e.g. use 1 if file has a header line).
+        chem_column (int):
+            Index of the first column of the file containing mixing ratios. E.g.
+            use 1 if the first column is P and the rest of the columns are mixing
+            ratios, or use 2 if the first two columns are P and T and the rest
+            are mixing ratios.
 
     Returns:
         X_interp (2D np.array of float): 
@@ -588,7 +594,7 @@ def read_chem_file(chem_file_dir, chem_file_name, P_grid, chem_species_in_file,
     
     # Read pressure and mixing ratios
     P_raw = np.array(chem_file_input)[:,0]
-    X_raw = np.array(chem_file_input)[:,2:] #MODIFIED so that it skips the temp column
+    X_raw = np.array(chem_file_input)[:,chem_column:]
 
     # Flip arrays if necessary so that arrays begin at bottom of the atmosphere
     if (P_raw[0] < P_raw[-1]):
