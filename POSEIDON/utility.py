@@ -594,7 +594,7 @@ def read_chem_file(chem_file_dir, chem_file_name, P_grid, chem_species_in_file,
     
     # Read pressure and mixing ratios
     P_raw = np.array(chem_file_input)[:,0]
-    X_raw = np.array(chem_file_input)[:,chem_column:]
+    X_raw = np.array(chem_file_input)[:,first_chem_column:]
 
     # Flip arrays if necessary so that arrays begin at bottom of the atmosphere
     if (P_raw[0] < P_raw[-1]):
