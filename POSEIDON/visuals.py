@@ -3949,7 +3949,7 @@ def plot_chem_retrieved(planet_name, chemical_species, log_Xs_median,
                         Atmosphere_dimension = 1, TwoD_type = None, plt_label = None, 
                         show_profiles = [], model_labels = [], colour_list = [],
                         log_P_min = None, log_P_max = None, log_X_min = None, 
-                        log_X_max = None):
+                        log_X_max = None, ax = None):
     '''
     Plot retrieved mixing ratio profiles.
     
@@ -4108,14 +4108,19 @@ def plot_chem_retrieved(planet_name, chemical_species, log_Xs_median,
     
     # create figure
     fig = plt.figure()  
-    ax = plt.gca()
+
+    if (ax == None):
+        ax1 = plt.gca()
+    else:
+        ax1 = ax
+
     
     # Assign axis spacing
     xmajorLocator_X = MultipleLocator(major_spacing)
     xminorLocator_X = MultipleLocator(minor_spacing)
         
-    ax.xaxis.set_major_locator(xmajorLocator_X)
-    ax.xaxis.set_minor_locator(xminorLocator_X)
+    ax1.xaxis.set_major_locator(xmajorLocator_X)
+    ax1.xaxis.set_minor_locator(xminorLocator_X)
     
     #***** Plot mixing ratio profiles *****#
     
@@ -4154,19 +4159,19 @@ def plot_chem_retrieved(planet_name, chemical_species, log_Xs_median,
                 label_two_sig = ''
 
                 # Plot median retrieved mixing ratio profile
-                ax.semilogy(log_X_med[chemical_species == species,:][0], P, 
+                ax1.semilogy(log_X_med[chemical_species == species,:][0], P, 
                             lw = 1.5, color = colours[q],
                             label = label_med)
 
                 # Plot +/- 1σ confidence region
-                ax.fill_betweenx(P, log_X_low1[chemical_species == species,:][0], 
+                ax1.fill_betweenx(P, log_X_low1[chemical_species == species,:][0], 
                                  log_X_high1[chemical_species == species,:][0],
                                  lw = 0.0, alpha = 0.4, facecolor = colours[q],
                                  label = label_one_sig)
 
                 # Plot +/- 2σ confidence region
                 if (plot_two_sigma == True):
-                    ax.fill_betweenx(P, log_X_low2[chemical_species == species,:][0], 
+                    ax1.fill_betweenx(P, log_X_low2[chemical_species == species,:][0], 
                                     log_X_high2[chemical_species == species,:][0],
                                     lw = 0.0, alpha = 0.2, facecolor = colours[q],
                                     label = label_two_sig)
@@ -4174,21 +4179,21 @@ def plot_chem_retrieved(planet_name, chemical_species, log_Xs_median,
                 # Plot actual (true) mixing ratio profile
                 if (log_X_true != None):
 
-                    ax.semilogy(log_X_true[chemical_species == species,:][0], P, 
+                    ax1.semilogy(log_X_true[chemical_species == species,:][0], P, 
                                 lw = 1.5, color = colours[q], ls = linestyles['dashed'],
                                 label = r'True ' + latex_species[q])
 
     # Common plot settings for all profiles
-    ax.invert_yaxis()            
-    ax.set_xlabel(r'Mixing Ratios (log $X_{\rm{i}}$)', fontsize = 20)
-    ax.set_xlim(log_X_min, log_X_max)  
-    ax.set_ylabel(r'Pressure (bar)', fontsize = 20)
-    ax.set_ylim(np.power(10.0, log_P_max), np.power(10.0, log_P_min))
+    ax1.invert_yaxis()            
+    ax1.set_xlabel(r'Mixing Ratios (log $X_{\rm{i}}$)', fontsize = 20)
+    ax1.set_xlim(log_X_min, log_X_max)  
+    ax1.set_ylabel(r'Pressure (bar)', fontsize = 20)
+    ax1.set_ylim(np.power(10.0, log_P_max), np.power(10.0, log_P_min))
 
-    ax.tick_params(labelsize=12)
+    ax1.tick_params(labelsize=12)
         
     # Add legend
-    legend = ax.legend(loc='upper right', shadow=True, prop={'size':14}, ncol=1,
+    legend = ax1.legend(loc='upper right', shadow=True, prop={'size':14}, ncol=1,
                        frameon=True, columnspacing=1.0)
     frame = legend.get_frame()
     frame.set_facecolor('0.90') 
@@ -5029,6 +5034,19 @@ def plot_histograms(planet, models, plot_parameters,
                     param_samples_m[:,q] = samples[:,np.where(param_names == param)[0][0]]
                 except:
                     param = 'log_P_cloud_SiO2'
+                    param_samples_m[:,q] = samples[:,np.where(param_names == param)[0][0]]
+
+
+            # another quick fix for diseq vs eq
+            elif param == 'C_O':
+                try:
+                except:
+                    param_samples_m[:,q] = samples[:,np.where(param_names == param)[0][0]]
+            elif param == 'log_met':
+                try:
+                    param_samples_m[:,q] = samples[:,np.where(param_names == param)[0][0]]
+                except:
+                    param = 'log_Met'
                     param_samples_m[:,q] = samples[:,np.where(param_names == param)[0][0]]
 
             else:
